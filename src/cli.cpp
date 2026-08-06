@@ -50,7 +50,10 @@ Options parse_options(int argc, char** argv) {
             std::exit(0);
         }
         if (argument == "-v" || argument == "--version") {
-            std::cout << nvbr::version << '\n';
+            std::cout
+                << nvbr::project_name << ' ' << nvbr::version << '\n'
+                << nvbr::copyright << '\n'
+                << nvbr::project_url << '\n';
             std::exit(0);
         }
         if (argument == "--timings") {

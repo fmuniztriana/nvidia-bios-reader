@@ -263,7 +263,8 @@ private:
         section_font_ = CreateFontIndirectW(&section_font);
 
         title_ = create_label(L"NVIDIA BIOS Reader", SS_LEFT);
-        subtitle_ = create_label(L"Read-only VBIOS memory analysis", SS_LEFT);
+        subtitle_ = create_label(L"", SS_LEFT);
+        set_text(subtitle_, L"Read-only VBIOS memory analysis - v" + widen(nvbr::version));
         SendMessageW(title_, WM_SETFONT, reinterpret_cast<WPARAM>(title_font_), TRUE);
         open_button_ = create_control(
             0, L"BUTTON", L"Open VBIOS...", BS_PUSHBUTTON | WS_TABSTOP, command_open);

@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(nvidia_bios_reader VERSION 0.2.0 LANGUAGES CXX)
+project(nvidia_bios_reader
+    VERSION 0.2.0
+    DESCRIPTION "Read-only NVIDIA VBIOS memory profile, strap, and timing analysis"
+    HOMEPAGE_URL "https://github.com/fmuniztriana/nvidia-bios-reader"
+    LANGUAGES CXX
+)
+
+if(WIN32)
+    enable_language(RC)
+endif()
 
 option(NVBR_BUILD_GUI "Build the native Windows GUI" ON)
 
@@ -18,6 +27,16 @@ add_executable(nvidia-bios-reader-cli
 
 target_link_libraries(nvidia-bios-reader-cli PRIVATE nvbr_core)
 
+if(WIN32)
+    set(NVBR_FILE_DESCRIPTION "NVIDIA BIOS Reader command-line interface")
+    set(NVBR_INTERNAL_NAME "nvidia-bios-reader-cli")
+    set(NVBR_ORIGINAL_FILENAME "nvidia-bios-reader-cli.exe")
+    configure_file(resources/version.rc.in cli-version.rc @ONLY)
+    target_sources(nvidia-bios-reader-cli PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/cli-version.rc
+    )
+endif()
+
 if(WIN32 AND NVBR_BUILD_GUI)
     add_executable(nvidia-bios-reader WIN32
         src/gui.cpp
@@ -27,6 +46,13 @@ if(WIN32 AND NVBR_BUILD_GUI)
         comctl32
         comdlg32
         shell32
+    )
+    set(NVBR_FILE_DESCRIPTION "NVIDIA BIOS Reader graphical interface")
+    set(NVBR_INTERNAL_NAME "nvidia-bios-reader")
+    set(NVBR_ORIGINAL_FILENAME "nvidia-bios-reader.exe")
+    configure_file(resources/version.rc.in gui-version.rc @ONLY)
+    target_sources(nvidia-bios-reader PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/gui-version.rc
     )
 endif()
 

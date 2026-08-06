@@ -14,6 +14,12 @@ namespace nvbr {
 #endif
 
 inline constexpr const char* version = NVBR_VERSION;
+inline constexpr const char* project_name = "NVIDIA BIOS Reader";
+inline constexpr const char* project_author = "Felipe Muniz";
+inline constexpr const char* project_handle = "@fmuniztriana";
+inline constexpr const char* project_url =
+    "https://github.com/fmuniztriana/nvidia-bios-reader";
+inline constexpr const char* copyright = "Copyright (c) 2026 Felipe Muniz";
 
 struct TimingView {
     std::size_t range_index{};

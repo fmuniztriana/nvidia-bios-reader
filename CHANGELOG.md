@@ -28,6 +28,7 @@ and the project intends to follow [Semantic Versioning](https://semver.org/).
 - CMake build, install rules, and basic CLI test;
 - repository documentation and GitHub continuous integration;
 - project-origin notes and public references for density-mod instability.
+- author, citation, release, and Windows executable version metadata.
 
 ### Changed
 

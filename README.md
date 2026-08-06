@@ -1,5 +1,9 @@
 # NVIDIA BIOS Reader
 
+[![Version 0.2.0](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/fmuniztriana/nvidia-bios-reader/releases/tag/v0.2.0)
+[![Build](https://github.com/fmuniztriana/nvidia-bios-reader/actions/workflows/build.yml/badge.svg)](https://github.com/fmuniztriana/nvidia-bios-reader/actions/workflows/build.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 NVIDIA BIOS Reader is an open-source, read-only research tool for inspecting
 NVIDIA video BIOS memory configuration. It provides a native Windows GUI and a
 portable command-line interface without third-party runtime dependencies.
@@ -174,6 +178,13 @@ is not permitted. See [Validation workflow](docs/validation.md).
 Reproducible findings, additional ROM validation, documentation corrections,
 and parser improvements are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md)
 before opening an issue or pull request.
+
+## Author
+
+Created and maintained by
+[Felipe Muniz (`@fmuniztriana`)](https://github.com/fmuniztriana).
+Community experiments and public technical sources that helped motivate the
+research are credited below and in the project documentation.
 
 ## Research references
 

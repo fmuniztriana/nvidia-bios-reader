@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software in research, please cite it as below."
+title: "NVIDIA BIOS Reader"
+type: software
+authors:
+  - family-names: "Muniz"
+    given-names: "Felipe"
+    alias: "fmuniztriana"
+repository-code: "https://github.com/fmuniztriana/nvidia-bios-reader"
+url: "https://github.com/fmuniztriana/nvidia-bios-reader"
+version: "0.2.0"
+date-released: 2026-08-06
+license: MIT
