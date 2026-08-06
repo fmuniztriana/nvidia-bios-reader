@@ -90,7 +90,8 @@ For a byte-by-byte walkthrough using only a hex editor, see
 Open `nvidia-bios-reader.exe`, choose **Open VBIOS**, or drag a ROM onto the
 window. Select a memory entry to inspect its timing ranges and select a timing
 range to view the decoded CONFIG fields. **Save Report** writes the complete
-analysis to a text file.
+analysis to a text file. **About** shows the application version, author,
+project links, license, and independence notice.
 
 The GUI uses native Win32 controls. It does not require Qt, .NET, or additional
 DLLs.

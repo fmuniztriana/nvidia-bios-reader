@@ -1,5 +1,6 @@
 #define UNICODE
 #define _UNICODE
+#define _WIN32_WINNT 0x0A00
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 
@@ -30,9 +31,20 @@ namespace {
 constexpr wchar_t window_class_name[] = L"NvidiaBiosReaderWindow";
 constexpr UINT command_open = 1001;
 constexpr UINT command_save = 1002;
+constexpr UINT command_about = 1003;
 constexpr UINT control_memory = 1101;
 constexpr UINT control_timings = 1102;
 constexpr UINT control_status = 1103;
+constexpr wchar_t author_url[] = L"https://github.com/fmuniztriana";
+
+HRESULT CALLBACK about_dialog_callback(
+    HWND, UINT notification, WPARAM, LPARAM parameter, LONG_PTR) {
+    if (notification == TDN_HYPERLINK_CLICKED) {
+        ShellExecuteW(nullptr, L"open", reinterpret_cast<LPCWSTR>(parameter),
+                      nullptr, nullptr, SW_SHOWNORMAL);
+    }
+    return S_OK;
+}
 
 std::wstring widen(const std::string& text) {
     if (text.empty()) {
@@ -172,6 +184,14 @@ private:
                 SetBkMode(device, TRANSPARENT);
                 return reinterpret_cast<LRESULT>(GetStockObject(WHITE_BRUSH));
             }
+            case WM_DRAWITEM: {
+                const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
+                if (draw && draw->CtlID == control_status && draw->itemID == 1) {
+                    draw_author_credit(draw);
+                    return TRUE;
+                }
+                break;
+            }
             case WM_SIZE:
                 layout_controls(LOWORD(lparam), HIWORD(lparam));
                 return 0;
@@ -182,6 +202,10 @@ private:
                 }
                 if (LOWORD(wparam) == command_save) {
                     save_dialog();
+                    return 0;
+                }
+                if (LOWORD(wparam) == command_about) {
+                    show_about();
                     return 0;
                 }
                 break;
@@ -208,6 +232,10 @@ private:
                 if (section_font_) {
                     DeleteObject(section_font_);
                     section_font_ = nullptr;
+                }
+                if (link_font_) {
+                    DeleteObject(link_font_);
+                    link_font_ = nullptr;
                 }
                 PostQuitMessage(0);
                 return 0;
@@ -262,6 +290,10 @@ private:
         section_font.lfWeight = FW_SEMIBOLD;
         section_font_ = CreateFontIndirectW(&section_font);
 
+        LOGFONTW link_font = metrics.lfMessageFont;
+        link_font.lfUnderline = TRUE;
+        link_font_ = CreateFontIndirectW(&link_font);
+
         title_ = create_label(L"NVIDIA BIOS Reader", SS_LEFT);
         subtitle_ = create_label(L"", SS_LEFT);
         set_text(subtitle_, L"Read-only VBIOS memory analysis - v" + widen(nvbr::version));
@@ -270,6 +302,8 @@ private:
             0, L"BUTTON", L"Open VBIOS...", BS_PUSHBUTTON | WS_TABSTOP, command_open);
         save_button_ = create_control(
             0, L"BUTTON", L"Save Report...", BS_PUSHBUTTON | WS_TABSTOP, command_save);
+        about_button_ = create_control(
+            0, L"BUTTON", L"About", BS_PUSHBUTTON | WS_TABSTOP, command_about);
         EnableWindow(save_button_, FALSE);
 
         summary_caption_ = create_label(L"VBIOS Summary");
@@ -347,13 +381,24 @@ private:
         const int content_width = std::max(0, width - 2 * margin);
 
         const int button_width = scale(122);
+        const int about_width = scale(82);
         const int button_height = scale(30);
-        MoveWindow(open_button_, width - margin - 2 * button_width - gap, margin,
+        MoveWindow(open_button_,
+                   width - margin - 2 * button_width - about_width - 2 * gap, margin,
                    button_width, button_height, FALSE);
-        MoveWindow(save_button_, width - margin - button_width, margin,
+        MoveWindow(save_button_, width - margin - button_width - about_width - gap, margin,
                    button_width, button_height, FALSE);
+        MoveWindow(about_button_, width - margin - about_width, margin,
+                   about_width, button_height, FALSE);
         MoveWindow(title_, margin, margin - scale(2), scale(260), scale(27), FALSE);
         MoveWindow(subtitle_, margin, margin + scale(25), scale(340), scale(18), FALSE);
+
+        const int author_width = scale(190);
+        const int status_parts[] = {std::max(0, width - author_width - scale(14)), -1};
+        SendMessageW(status_bar_, SB_SETPARTS, 2,
+                     reinterpret_cast<LPARAM>(status_parts));
+        SendMessageW(status_bar_, SB_SETTEXTW, 1 | SBT_OWNERDRAW,
+                     reinterpret_cast<LPARAM>(this));
 
         const int summary_top = margin + scale(48);
         const int summary_height = scale(104);
@@ -606,9 +651,45 @@ private:
         set_text(decoded_value_, L"Select a timing range to view the known fields.");
     }
 
+    void draw_author_credit(const DRAWITEMSTRUCT* draw) const {
+        RECT area = draw->rcItem;
+        FillRect(draw->hDC, &area, GetSysColorBrush(COLOR_BTNFACE));
+        SetBkMode(draw->hDC, TRANSPARENT);
+
+        constexpr wchar_t prefix[] = L"Created by ";
+        constexpr wchar_t handle[] = L"@fmuniztriana";
+        RECT text_area = area;
+        text_area.left += scale(6);
+
+        const HGDIOBJ previous_font = SelectObject(draw->hDC, font_);
+        const COLORREF previous_color = SetTextColor(draw->hDC, GetSysColor(COLOR_BTNTEXT));
+        DrawTextW(draw->hDC, prefix, -1, &text_area,
+                  DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+
+        SIZE prefix_size{};
+        GetTextExtentPoint32W(draw->hDC, prefix,
+                              static_cast<int>(std::size(prefix) - 1), &prefix_size);
+        text_area.left += prefix_size.cx;
+        SelectObject(draw->hDC, link_font_);
+        SetTextColor(draw->hDC, RGB(0, 102, 204));
+        DrawTextW(draw->hDC, handle, -1, &text_area,
+                  DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+
+        SetTextColor(draw->hDC, previous_color);
+        SelectObject(draw->hDC, previous_font);
+    }
+
     LRESULT handle_notify(const NMHDR* header) {
         if (!header) {
             return 0;
+        }
+        if (header->hwndFrom == status_bar_ && header->code == NM_CLICK) {
+            const auto* click = reinterpret_cast<const NMMOUSE*>(header);
+            if (click->dwItemSpec == 1) {
+                ShellExecuteW(window_, L"open", author_url,
+                              nullptr, nullptr, SW_SHOWNORMAL);
+                return 0;
+            }
         }
         if (header->hwndFrom == memory_list_ && header->code == LVN_ITEMCHANGED) {
             const auto* change = reinterpret_cast<const NMLISTVIEW*>(header);
@@ -676,6 +757,35 @@ private:
         }
     }
 
+    void show_about() const {
+        const std::wstring main_instruction =
+            L"NVIDIA BIOS Reader " + widen(nvbr::version);
+        const std::wstring content =
+            L"Read-only NVIDIA VBIOS memory analysis\n\n"
+            L"Created by Felipe Muniz (@fmuniztriana)\n"
+            L"<a href=\"https://github.com/fmuniztriana\">"
+            L"github.com/fmuniztriana</a>\n\n"
+            L"Project repository\n"
+            L"<a href=\"https://github.com/fmuniztriana/nvidia-bios-reader\">"
+            L"github.com/fmuniztriana/nvidia-bios-reader</a>\n\n"
+            L"Licensed under the MIT License.";
+        TASKDIALOGCONFIG dialog{};
+        dialog.cbSize = sizeof(dialog);
+        dialog.hwndParent = window_;
+        dialog.hInstance = instance_;
+        dialog.dwFlags = TDF_ENABLE_HYPERLINKS | TDF_SIZE_TO_CONTENT;
+        dialog.dwCommonButtons = TDCBF_CLOSE_BUTTON;
+        dialog.pszWindowTitle = L"About NVIDIA BIOS Reader";
+        dialog.pszMainIcon = TD_INFORMATION_ICON;
+        dialog.pszMainInstruction = main_instruction.c_str();
+        dialog.pszContent = content.c_str();
+        dialog.pszFooter =
+            L"Independent open-source project. Not affiliated with or endorsed by "
+            L"NVIDIA Corporation.";
+        dialog.pfCallback = about_dialog_callback;
+        TaskDialogIndirect(&dialog, nullptr, nullptr, nullptr);
+    }
+
     void save_dialog() {
         if (!document_) {
             return;
@@ -724,10 +834,12 @@ private:
     HFONT font_{};
     HFONT title_font_{};
     HFONT section_font_{};
+    HFONT link_font_{};
     HWND title_{};
     HWND subtitle_{};
     HWND open_button_{};
     HWND save_button_{};
+    HWND about_button_{};
     HWND summary_caption_{};
     HWND chip_caption_{};
     HWND device_caption_{};

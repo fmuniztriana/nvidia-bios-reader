@@ -29,6 +29,9 @@ and the project intends to follow [Semantic Versioning](https://semver.org/).
 - repository documentation and GitHub continuous integration;
 - project-origin notes and public references for density-mod instability.
 - author, citation, release, and Windows executable version metadata.
+- discreet clickable author credit in the lower-right status area;
+- complete About dialog with version, author, GitHub links, license, and
+  NVIDIA independence notice.
 
 ### Changed
 
