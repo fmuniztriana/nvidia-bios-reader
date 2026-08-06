@@ -1,0 +1,43 @@
+name: Research finding
+description: Propose a new field interpretation or architecture validation
+title: "[Research]: "
+labels:
+  - research
+body:
+  - type: textarea
+    id: finding
+    attributes:
+      label: Finding
+      description: State the proposed interpretation and its confidence level.
+    validations:
+      required: true
+
+  - type: textarea
+    id: samples
+    attributes:
+      label: Samples
+      description: List SHA-256 hashes, public URLs, GPU chips, and relevant memory configurations.
+    validations:
+      required: true
+
+  - type: textarea
+    id: offsets
+    attributes:
+      label: Offsets and byte patterns
+      description: Include exact offsets, raw values, and how they were located.
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Independent validation
+      description: Describe comparisons with specifications, tools, runtime behavior, or additional ROMs.
+
+  - type: checkboxes
+    id: distribution
+    attributes:
+      label: Distribution
+      options:
+        - label: I have not attached proprietary or non-redistributable files.
+          required: true

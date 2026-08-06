@@ -1,0 +1,14 @@
+* text=auto
+.* text eol=lf
+LICENSE text eol=lf
+
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.txt text eol=lf
+*.rom binary
+*.vbios binary
+*.bin binary
+*.png binary

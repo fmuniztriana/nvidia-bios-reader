@@ -1,0 +1,66 @@
+name: Bug report
+description: Report incorrect output, a crash, or a user-interface problem
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach a ROM unless you have permission to redistribute it. A SHA-256 hash and public source URL are preferred.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Program version or commit hash
+    validations:
+      required: true
+
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      options:
+        - Windows GUI
+        - Command-line interface
+        - Parser/library
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: VBIOS sample identity
+      description: SHA-256, file size, GPU chip, Device ID, VBIOS version, and public source URL
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Supporting evidence
+      description: Relevant report excerpt, offsets, screenshots, or independent-tool comparison
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Data safety
+      options:
+        - label: I removed serial numbers, private paths, and files I cannot redistribute.
+          required: true

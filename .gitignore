@@ -1,0 +1,41 @@
+# Build directories and CMake output
+/build/
+/out/
+/cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+CMakeUserPresets.json
+
+# Compilers and linkers
+*.obj
+*.o
+*.exe
+*.dll
+*.lib
+*.a
+*.pdb
+*.ilk
+*.exp
+*.manifest
+
+# VBIOS files and generated research output
+*.rom
+*.vbios
+*.bin
+*-report.txt
+/reports/
+/corpus/
+
+# IDE and operating-system files
+/.vs/
+/.vscode/
+/.idea/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+desktop.ini
