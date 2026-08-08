@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bitset>
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -392,6 +393,14 @@ void parse_info(
     }
 }
 
+[[nodiscard]] double device_clock_divisor(std::uint8_t memory_type_code) {
+    switch (memory_type_code) {
+        case 0x9: return 4.0; // GDDR6: NVIDIA/Afterburner MCLK to device clock.
+        case 0xA: return 8.0; // GDDR6X: NVIDIA/Afterburner MCLK to device clock.
+        default: return 1.0;
+    }
+}
+
 [[nodiscard]] std::size_t uefi_length_after_legacy(
     const std::vector<PciImage>& images, const PciImage& legacy) {
     const std::size_t expected_base = legacy.base + legacy.length;
@@ -636,6 +645,23 @@ void parse_timings(
     return result;
 }
 
+[[nodiscard]] std::string ramcfg_bits(std::size_t code) {
+    if (code > 0x1F) {
+        return "outside 5-bit RAMCFG range";
+    }
+    return std::bitset<5>(code).to_string();
+}
+
+[[nodiscard]] std::string strap_levels(std::size_t code) {
+    static constexpr std::array<std::string_view, 16> levels{
+        "L/L/L", "L/L/H", "L/H/L", "L/H/H",
+        "H/L/L", "H/L/H", "H/H/L", "H/H/H",
+        "L/L/M", "L/M/L", "L/M/H", "L/H/M",
+        "M/L/L", "M/L/H", "M/H/L", "M/H/H",
+    };
+    return code < levels.size() ? std::string(levels[code]) : "not decoded";
+}
+
 [[nodiscard]] std::string physical_straps(const MemoryEntry& entry) {
     if (entry.physical_straps.empty()) {
         return "not referenced by the translation table";
@@ -643,7 +669,23 @@ void parse_timings(
     std::ostringstream output;
     for (std::size_t i = 0; i < entry.physical_straps.size(); ++i) {
         if (i != 0) output << ", ";
-        output << entry.physical_straps[i];
+        const std::size_t code = entry.physical_straps[i];
+        output << code << " (" << strap_levels(code)
+               << ", RAMCFG " << ramcfg_bits(code) << ')';
+    }
+    return output.str();
+}
+
+[[nodiscard]] std::string compact_physical_straps(const MemoryEntry& entry) {
+    if (entry.physical_straps.empty()) {
+        return "Unmapped";
+    }
+    std::ostringstream output;
+    for (std::size_t i = 0; i < entry.physical_straps.size(); ++i) {
+        if (i != 0) output << ", ";
+        const std::size_t code = entry.physical_straps[i];
+        output << code << ": " << strap_levels(code)
+               << " (" << ramcfg_bits(code) << ')';
     }
     return output.str();
 }
@@ -671,7 +713,8 @@ void parse_timings(
         << "Memory info table: " << hex_value(analysis.memory_info_offset)
         << " (version " << hex_value(analysis.memory_table_version, 2)
         << ", record length " << static_cast<unsigned>(analysis.memory_record_length) << ")\n"
-        << "Strap translation: " << hex_value(analysis.translation_offset) << '\n'
+        << "Strap translation: " << hex_value(analysis.translation_offset)
+        << " (" << analysis.translation.size() << " declared physical codes)\n"
         << "Timing map:        ";
     if (analysis.timing_map_offset) out << hex_value(*analysis.timing_map_offset);
     else out << "unavailable";
@@ -684,8 +727,35 @@ void parse_timings(
     } else {
         out << "unavailable";
     }
-    out << "\n\nMemory support\n"
+    out << "\n\nPhysical RAMCFG translation\n"
+        << "---------------------------\n";
+    for (std::size_t physical = 0; physical < analysis.translation.size(); ++physical) {
+        const std::size_t target = analysis.translation[physical];
+        out << "Physical " << physical
+            << " / RAMCFG " << ramcfg_bits(physical)
+            << " / " << strap_levels(physical)
+            << " -> group " << target;
+        if (target < analysis.memory_entries.size()) {
+            out << " (entry " << (target + 1) << ')';
+        } else {
+            out << " (invalid target)";
+        }
+        out << '\n';
+    }
+
+    out << "\nMemory support\n"
         << "--------------\n";
+    const std::size_t described_profiles = static_cast<std::size_t>(std::count_if(
+        analysis.memory_entries.begin(), analysis.memory_entries.end(),
+        [](const MemoryEntry& entry) { return entry.memory_type_code != 0xF; }));
+    const std::size_t referenced_profiles = static_cast<std::size_t>(std::count_if(
+        analysis.memory_entries.begin(), analysis.memory_entries.end(),
+        [](const MemoryEntry& entry) {
+            return entry.memory_type_code != 0xF && !entry.physical_straps.empty();
+        }));
+    out << "Declared records: " << analysis.memory_entries.size()
+        << "; shown descriptors: " << described_profiles
+        << "; referenced descriptors: " << referenced_profiles << "\n\n";
 
     for (const auto& entry : analysis.memory_entries) {
         out << "Entry " << (entry.index + 1) << " / strap group " << entry.index
@@ -711,14 +781,16 @@ void parse_timings(
         if (entry.memory_type_code != 0xF && !analysis.timing_ranges.empty()) {
             for (const auto& range : analysis.timing_ranges) {
                 out << "    Range " << range.index << " @ " << hex_value(range.offset)
-                    << ": raw " << range.low << "-" << range.high;
+                    << ": MCLK " << range.low << "-" << range.high << " MHz";
                 if (range.low == 0 && range.high == 0) {
                     out << " (unused map slot; excluded from coverage) -> ";
                 } else {
-                    out << " (inferred displayed clock "
+                    const double divisor = device_clock_divisor(entry.memory_type_code);
+                    out << " (inferred device clock, MCLK/"
+                        << static_cast<unsigned>(divisor) << ": "
                         << std::fixed << std::setprecision(2)
-                        << (static_cast<double>(range.low) / 4.0) << '-'
-                        << (static_cast<double>(range.high) / 4.0) << " MHz) -> ";
+                        << (static_cast<double>(range.low) / divisor) << '-'
+                        << (static_cast<double>(range.high) / divisor) << " MHz) -> ";
                 }
                 if (entry.index >= range.timing_ids.size()) {
                     out << "missing group\n";
@@ -763,8 +835,10 @@ void parse_timings(
     out << "Notes\n"
         << "-----\n"
         << "- Density is per memory device; total VRAM cannot be derived from this descriptor alone.\n"
+        << "- L/M/H describes the standard multilevel RAMCFG codebook; M is the midpoint voltage.\n"
+        << "- Only physical codes inside the VBIOS-declared translation-table count are selectable mappings.\n"
         << "- Timing values are memory-controller register fields/cycle counts, not nanoseconds.\n"
-        << "- The displayed-clock conversion (raw value / 4) is an observed Turing/Ampere convention and is marked inferred.\n"
+        << "- Timing-map ranges use the NVIDIA/Afterburner MCLK domain; device clock is inferred as MCLK/4 for GDDR6 and MCLK/8 for GDDR6X.\n"
         << "- This tool reads the ROM only and never modifies it.\n";
     return out.str();
 }
@@ -797,9 +871,31 @@ Document inspect_vbios(const fs::path& path) {
     document.vbios_version = analysis.vbios_version;
     document.bit_offset = analysis.bit_offset;
     document.memory_info_offset = analysis.memory_info_offset;
+    document.strap_translation_offset = analysis.translation_offset;
     document.timing_map_offset = analysis.timing_map_offset;
     if (analysis.timing_table) {
         document.timing_table_offset = analysis.timing_table->offset;
+    }
+    document.declared_memory_records = analysis.memory_entries.size();
+    document.described_memory_profiles = static_cast<std::size_t>(std::count_if(
+        analysis.memory_entries.begin(), analysis.memory_entries.end(),
+        [](const MemoryEntry& entry) { return entry.memory_type_code != 0xF; }));
+    document.referenced_memory_profiles = static_cast<std::size_t>(std::count_if(
+        analysis.memory_entries.begin(), analysis.memory_entries.end(),
+        [](const MemoryEntry& entry) {
+            return entry.memory_type_code != 0xF && !entry.physical_straps.empty();
+        }));
+
+    document.strap_translation.reserve(analysis.translation.size());
+    for (std::size_t physical = 0; physical < analysis.translation.size(); ++physical) {
+        const std::size_t target = analysis.translation[physical];
+        document.strap_translation.push_back(StrapTranslationView{
+            physical,
+            ramcfg_bits(physical),
+            strap_levels(physical),
+            target,
+            target < analysis.memory_entries.size(),
+        });
     }
 
     document.memory.reserve(analysis.memory_entries.size());
@@ -814,7 +910,8 @@ Document inspect_vbios(const fs::path& path) {
         memory.vendor = entry.vendor;
         memory.density = entry.density;
         memory.organization = entry.organization;
-        memory.physical_straps = physical_straps(entry);
+        memory.physical_straps = compact_physical_straps(entry);
+        memory.physical_straps_detail = physical_straps(entry);
         memory.coverage = memory.skipped
             ? "N/A"
             : timing_status(rom, analysis, entry.index);
@@ -826,8 +923,11 @@ Document inspect_vbios(const fs::path& path) {
                 timing.range_index = range.index;
                 timing.raw_low = range.low;
                 timing.raw_high = range.high;
-                timing.displayed_low_mhz = static_cast<double>(range.low) / 4.0;
-                timing.displayed_high_mhz = static_cast<double>(range.high) / 4.0;
+                timing.device_clock_divisor = device_clock_divisor(entry.memory_type_code);
+                timing.device_low_mhz = static_cast<double>(range.low) /
+                    timing.device_clock_divisor;
+                timing.device_high_mhz = static_cast<double>(range.high) /
+                    timing.device_clock_divisor;
                 timing.unused = range.low == 0 && range.high == 0;
                 if (entry.index < range.timing_ids.size()) {
                     const std::uint8_t id = range.timing_ids[entry.index];

@@ -35,6 +35,18 @@ constexpr UINT command_about = 1003;
 constexpr UINT control_memory = 1101;
 constexpr UINT control_timings = 1102;
 constexpr UINT control_status = 1103;
+constexpr UINT_PTR tooltip_memory_ramcfg = 2101;
+constexpr UINT_PTR tooltip_memory_status = 2102;
+constexpr UINT_PTR tooltip_memory_entry = 2103;
+constexpr UINT_PTR tooltip_memory_density = 2104;
+constexpr UINT_PTR tooltip_memory_organization = 2105;
+constexpr UINT_PTR tooltip_timing_range = 2201;
+constexpr UINT_PTR tooltip_timing_mclk = 2202;
+constexpr UINT_PTR tooltip_timing_clock = 2203;
+constexpr UINT_PTR tooltip_timing_id = 2204;
+constexpr UINT_PTR tooltip_timing_state = 2205;
+constexpr UINT_PTR tooltip_timing_map_offset = 2206;
+constexpr UINT_PTR tooltip_timing_record_offset = 2207;
 constexpr wchar_t author_url[] = L"https://github.com/fmuniztriana";
 
 HRESULT CALLBACK about_dialog_callback(
@@ -68,10 +80,10 @@ std::wstring hex_offset(std::size_t value) {
 }
 
 std::wstring decimal_range(std::uint16_t low, std::uint16_t high) {
-    return std::to_wstring(low) + L" - " + std::to_wstring(high);
+    return std::to_wstring(low) + L" - " + std::to_wstring(high) + L" MHz";
 }
 
-std::wstring displayed_range(double low, double high) {
+std::wstring device_clock_range(double low, double high) {
     std::wostringstream out;
     out << std::fixed << std::setprecision(2) << low << L" - " << high << L" MHz";
     return out.str();
@@ -103,7 +115,7 @@ public:
         instance_ = instance;
         WNDCLASSEXW window_class{};
         window_class.cbSize = sizeof(window_class);
-        window_class.style = CS_HREDRAW | CS_VREDRAW;
+        window_class.style = 0;
         window_class.lpfnWndProc = &Application::window_proc;
         window_class.hInstance = instance;
         window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
@@ -193,7 +205,9 @@ private:
                 break;
             }
             case WM_SIZE:
-                layout_controls(LOWORD(lparam), HIWORD(lparam));
+                if (wparam != SIZE_MINIMIZED) {
+                    layout_controls(LOWORD(lparam), HIWORD(lparam));
+                }
                 return 0;
             case WM_COMMAND:
                 if (LOWORD(wparam) == command_open) {
@@ -275,6 +289,48 @@ private:
         return create_control(0, L"STATIC", text, style);
     }
 
+    void add_tooltip(HWND target, const wchar_t* text) {
+        if (!tooltip_ || !target) {
+            return;
+        }
+        TTTOOLINFOW tool{};
+        tool.cbSize = sizeof(tool);
+        tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+        tool.hwnd = window_;
+        tool.uId = reinterpret_cast<UINT_PTR>(target);
+        tool.lpszText = const_cast<wchar_t*>(text);
+        SendMessageW(tooltip_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&tool));
+    }
+
+    void add_header_tooltip(
+        HWND header, int column, UINT_PTR id, const wchar_t* text) {
+        RECT rect{};
+        if (!tooltip_ || !header || !Header_GetItemRect(header, column, &rect)) {
+            return;
+        }
+        TTTOOLINFOW tool{};
+        tool.cbSize = sizeof(tool);
+        tool.uFlags = TTF_SUBCLASS;
+        tool.hwnd = header;
+        tool.uId = id;
+        tool.rect = rect;
+        tool.lpszText = const_cast<wchar_t*>(text);
+        SendMessageW(tooltip_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&tool));
+    }
+
+    void update_header_tooltip(HWND header, int column, UINT_PTR id) {
+        RECT rect{};
+        if (!tooltip_ || !header || !Header_GetItemRect(header, column, &rect)) {
+            return;
+        }
+        TTTOOLINFOW tool{};
+        tool.cbSize = sizeof(tool);
+        tool.hwnd = header;
+        tool.uId = id;
+        tool.rect = rect;
+        SendMessageW(tooltip_, TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&tool));
+    }
+
     void create_controls() {
         NONCLIENTMETRICSW metrics{};
         metrics.cbSize = sizeof(metrics);
@@ -317,7 +373,7 @@ private:
         version_value_ = create_label(L"-");
         file_value_ = create_label(L"Open or drop a VBIOS file");
 
-        memory_caption_ = create_label(L"Memory Support");
+        memory_caption_ = create_label(L"Memory Support", SS_LEFT | SS_NOTIFY);
         SendMessageW(memory_caption_, WM_SETFONT, reinterpret_cast<WPARAM>(section_font_), TRUE);
         memory_list_ = create_control(
             WS_EX_CLIENTEDGE,
@@ -332,13 +388,14 @@ private:
         add_column(memory_list_, 2, L"Vendor", scale(92));
         add_column(memory_list_, 3, L"Density", scale(88));
         add_column(memory_list_, 4, L"Organization", scale(190));
-        add_column(memory_list_, 5, L"Physical Straps", scale(140));
+        add_column(memory_list_, 5, L"Physical RAMCFG", scale(210));
         add_column(memory_list_, 6, L"Timing Status", scale(120));
 
-        details_caption_ = create_label(L"Selected Memory Profile");
+        details_caption_ = create_label(
+            L"Selected Memory Profile", SS_LEFT | SS_NOTIFY);
         SendMessageW(details_caption_, WM_SETFONT, reinterpret_cast<WPARAM>(section_font_), TRUE);
         profile_value_ = create_label(L"Select a memory entry to inspect its timing map.");
-        descriptor_value_ = create_label(L"Descriptor: -");
+        descriptor_value_ = create_label(L"Descriptor: -", SS_LEFT | SS_NOTIFY);
         timing_list_ = create_control(
             WS_EX_CLIENTEDGE,
             WC_LISTVIEWW,
@@ -348,14 +405,15 @@ private:
         ListView_SetExtendedListViewStyle(
             timing_list_, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
         add_column(timing_list_, 0, L"Range", scale(56));
-        add_column(timing_list_, 1, L"Raw Clock", scale(110));
-        add_column(timing_list_, 2, L"Displayed Clock (inferred)", scale(180));
+        add_column(timing_list_, 1, L"MCLK Range", scale(110));
+        add_column(timing_list_, 2, L"Device Clock (inferred)", scale(180));
         add_column(timing_list_, 3, L"Timing ID", scale(78));
         add_column(timing_list_, 4, L"Map Offset", scale(92));
         add_column(timing_list_, 5, L"Record Offset", scale(100));
         add_column(timing_list_, 6, L"State", scale(96));
 
-        decoded_caption_ = create_label(L"Decoded CONFIG0..CONFIG5 fields");
+        decoded_caption_ = create_label(
+            L"Decoded CONFIG0..CONFIG5 fields", SS_LEFT | SS_NOTIFY);
         SendMessageW(decoded_caption_, WM_SETFONT, reinterpret_cast<WPARAM>(section_font_), TRUE);
         decoded_value_ = create_control(
             WS_EX_CLIENTEDGE,
@@ -365,6 +423,73 @@ private:
 
         status_bar_ = create_control(
             0, STATUSCLASSNAMEW, L"Open or drop an NVIDIA VBIOS file.", SBARS_SIZEGRIP, control_status);
+
+        tooltip_ = CreateWindowExW(
+            WS_EX_TOPMOST,
+            TOOLTIPS_CLASSW,
+            nullptr,
+            WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+            window_, nullptr, instance_, nullptr);
+        SendMessageW(tooltip_, TTM_SETMAXTIPWIDTH, 0, scale(520));
+        SendMessageW(tooltip_, TTM_SETDELAYTIME, TTDT_AUTOPOP, 15000);
+
+        add_tooltip(
+            memory_caption_,
+            L"Records: all Memory Information records declared by the ROM.\n"
+            L"Shown: non-Skip descriptors displayed below.\n"
+            L"Referenced: displayed descriptors selected by at least one declared physical RAMCFG code.");
+        add_header_tooltip(
+            ListView_GetHeader(memory_list_), 0, tooltip_memory_entry,
+            L"One-based row number of a record declared by the VBIOS Memory Information table. It is not the active physical RAMCFG value.");
+        add_header_tooltip(
+            ListView_GetHeader(memory_list_), 3, tooltip_memory_density,
+            L"Nominal capacity of one memory device, not total board VRAM. Total capacity also depends on device count, organization and physical population.");
+        add_header_tooltip(
+            ListView_GetHeader(memory_list_), 4, tooltip_memory_organization,
+            L"Decoded organization expected by this firmware profile. x16/single-sided and x8/double-sided clamshell describe profile topology; they do not prove how this particular board is physically populated.");
+        add_header_tooltip(
+            ListView_GetHeader(memory_list_), 5, tooltip_memory_ramcfg,
+            L"Maps an electrical STRAP2/STRAP1/STRAP0 combination to a memory descriptor. "
+            L"L, M and H mean low, midpoint and high voltage. Unmapped means that no declared translation entry selects the descriptor.");
+        add_header_tooltip(
+            ListView_GetHeader(memory_list_), 6, tooltip_memory_status,
+            L"FULL - every used clock range references a present, non-zero timing record.\n"
+            L"PARTIAL - valid timing records and FF gaps are both present.\n"
+            L"EMPTY (all FF) - no used clock range references a timing record.\n"
+            L"INVALID REFERENCE - a timing ID is missing, outside the table, or points to an all-zero record.\n"
+            L"These labels describe table coverage, not proven runtime stability.");
+        add_header_tooltip(
+            ListView_GetHeader(timing_list_), 0, tooltip_timing_range,
+            L"Index of the clock-range record in the timing map. A raw 0-0 range is an unused slot and does not affect coverage.");
+        add_header_tooltip(
+            ListView_GetHeader(timing_list_), 2, tooltip_timing_clock,
+            L"Memory-device clock comparable to GPU-Z: inferred as MCLK/4 for GDDR6 and MCLK/8 for GDDR6X. It is not a documented P-state name.");
+        add_header_tooltip(
+            ListView_GetHeader(timing_list_), 1, tooltip_timing_mclk,
+            L"Clock domain used by NVIDIA telemetry and tools such as MSI Afterburner. For example, 11501 MHz GDDR6X is about 1437.6 MHz at the memory device.");
+        add_header_tooltip(
+            ListView_GetHeader(timing_list_), 3, tooltip_timing_id,
+            L"Timing-record index selected for this memory descriptor and clock range. FF means that no timing record is referenced.");
+        add_header_tooltip(
+            ListView_GetHeader(timing_list_), 4, tooltip_timing_map_offset,
+            L"File offset of the timing-map byte that stores the selected Timing ID for this memory group and clock range.");
+        add_header_tooltip(
+            ListView_GetHeader(timing_list_), 5, tooltip_timing_record_offset,
+            L"File offset of the timing record referenced by the Timing ID. A dash means that no valid record was resolved.");
+        add_header_tooltip(
+            ListView_GetHeader(timing_list_), 6, tooltip_timing_state,
+            L"Present means the referenced record exists and is non-zero. No record means FF; Unused identifies a 0-0 map slot.");
+        add_tooltip(
+            details_caption_,
+            L"Entry is the one-based Memory Information row. Strap group is its zero-based logical index in the timing map; it is different from a physical RAMCFG selector.");
+        add_tooltip(
+            descriptor_value_,
+            L"Descriptor is the raw 32-bit memory-profile value. ROM offset is its byte location in the file. Physical straps lists declared RAMCFG codes that translate to this logical profile.");
+        add_tooltip(
+            decoded_caption_,
+            L"Reverse-engineered memory-controller fields from CONFIG0 through CONFIG5. "
+            L"Values are raw fields or cycle counts, not nanoseconds; smaller is not universally better.");
         DragAcceptFiles(window_, TRUE);
     }
 
@@ -383,15 +508,25 @@ private:
         const int button_width = scale(122);
         const int about_width = scale(82);
         const int button_height = scale(30);
-        MoveWindow(open_button_,
-                   width - margin - 2 * button_width - about_width - 2 * gap, margin,
-                   button_width, button_height, FALSE);
-        MoveWindow(save_button_, width - margin - button_width - about_width - gap, margin,
-                   button_width, button_height, FALSE);
-        MoveWindow(about_button_, width - margin - about_width, margin,
-                   about_width, button_height, FALSE);
-        MoveWindow(title_, margin, margin - scale(2), scale(260), scale(27), FALSE);
-        MoveWindow(subtitle_, margin, margin + scale(25), scale(340), scale(18), FALSE);
+        HDWP positions = BeginDeferWindowPos(24);
+        const auto position = [&](HWND control, int x, int y, int control_width,
+                                  int control_height) {
+            if (positions) {
+                positions = DeferWindowPos(
+                    positions, control, nullptr, x, y,
+                    std::max(0, control_width), std::max(0, control_height),
+                    SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+            }
+        };
+        position(open_button_,
+                 width - margin - 2 * button_width - about_width - 2 * gap, margin,
+                 button_width, button_height);
+        position(save_button_, width - margin - button_width - about_width - gap, margin,
+                 button_width, button_height);
+        position(about_button_, width - margin - about_width, margin,
+                 about_width, button_height);
+        position(title_, margin, margin - scale(2), scale(260), scale(27));
+        position(subtitle_, margin, margin + scale(25), scale(340), scale(18));
 
         const int author_width = scale(190);
         const int status_parts[] = {std::max(0, width - author_width - scale(14)), -1};
@@ -402,62 +537,63 @@ private:
 
         const int summary_top = margin + scale(48);
         const int summary_height = scale(104);
-        MoveWindow(summary_caption_, margin, summary_top, content_width, scale(22), FALSE);
+        position(summary_caption_, margin, summary_top, content_width, scale(22));
 
         const int label_width = scale(92);
         const int value_width = scale(170);
         const int row1 = summary_top + scale(28);
         const int row2 = summary_top + scale(61);
         int x = margin + scale(16);
-        MoveWindow(chip_caption_, x, row1, label_width, scale(20), FALSE);
-        MoveWindow(chip_value_, x + label_width, row1, value_width, scale(20), FALSE);
+        position(chip_caption_, x, row1, label_width, scale(20));
+        position(chip_value_, x + label_width, row1, value_width, scale(20));
         x += label_width + value_width + scale(20);
-        MoveWindow(device_caption_, x, row1, label_width, scale(20), FALSE);
-        MoveWindow(device_value_, x + label_width, row1, value_width, scale(20), FALSE);
+        position(device_caption_, x, row1, label_width, scale(20));
+        position(device_value_, x + label_width, row1, value_width, scale(20));
         x += label_width + value_width + scale(10);
-        MoveWindow(version_caption_, x, row1, label_width, scale(20), FALSE);
-        MoveWindow(version_value_, x + label_width, row1,
-                   std::max(scale(120), width - margin - (x + label_width + scale(12))),
-                   scale(20), FALSE);
+        position(version_caption_, x, row1, label_width, scale(20));
+        position(version_value_, x + label_width, row1,
+                 std::max(scale(120), width - margin - (x + label_width + scale(12))),
+                 scale(20));
         x = margin + scale(16);
-        MoveWindow(file_caption_, x, row2, label_width, scale(20), FALSE);
-        MoveWindow(file_value_, x + label_width, row2,
-                   content_width - label_width - scale(32), scale(20), FALSE);
+        position(file_caption_, x, row2, label_width, scale(20));
+        position(file_value_, x + label_width, row2,
+                 content_width - label_width - scale(32), scale(20));
 
         const int memory_title_top = summary_top + summary_height + scale(10);
-        MoveWindow(memory_caption_, margin, memory_title_top,
-                   content_width, scale(22), FALSE);
+        position(memory_caption_, margin, memory_title_top,
+                 content_width, scale(22));
         const int memory_top = memory_title_top + scale(23);
         const int available = height - status_height - memory_top - margin;
         const int memory_height = std::max(scale(125), available * 42 / 100);
-        MoveWindow(memory_list_, margin, memory_top, content_width, memory_height, FALSE);
+        position(memory_list_, margin, memory_top, content_width, memory_height);
 
         const int details_top = memory_top + memory_height + gap;
         const int details_height = std::max(0, height - status_height - details_top - margin);
-        MoveWindow(details_caption_, margin, details_top, content_width, scale(22), FALSE);
-        MoveWindow(profile_value_, margin + scale(14), details_top + scale(24),
-                   content_width - scale(28), scale(20), FALSE);
-        MoveWindow(descriptor_value_, margin + scale(14), details_top + scale(45),
-                   content_width - scale(28), scale(20), FALSE);
+        position(details_caption_, margin, details_top, content_width, scale(22));
+        position(profile_value_, margin + scale(14), details_top + scale(24),
+                 content_width - scale(28), scale(20));
+        position(descriptor_value_, margin + scale(14), details_top + scale(45),
+                 content_width - scale(28), scale(20));
         const int timing_top = details_top + scale(68);
         const int decoded_height = scale(66);
         const int timing_height = std::max(scale(70), details_height - scale(68) - decoded_height - scale(37));
-        MoveWindow(timing_list_, margin + scale(12), timing_top,
-                   content_width - scale(24), timing_height, FALSE);
+        position(timing_list_, margin + scale(12), timing_top,
+                 content_width - scale(24), timing_height);
         const int decoded_top = timing_top + timing_height + scale(6);
-        MoveWindow(decoded_caption_, margin + scale(12), decoded_top,
-                   content_width - scale(24), scale(19), FALSE);
-        MoveWindow(decoded_value_, margin + scale(12), decoded_top + scale(20),
-                   content_width - scale(24), decoded_height, FALSE);
+        position(decoded_caption_, margin + scale(12), decoded_top,
+                 content_width - scale(24), scale(19));
+        position(decoded_value_, margin + scale(12), decoded_top + scale(20),
+                 content_width - scale(24), decoded_height);
+
+        if (positions) {
+            EndDeferWindowPos(positions);
+        }
 
         resize_columns();
 
-        // Moving every child with immediate repaint lets transparent labels
-        // and list controls paint over one another during live resizing.
-        // Paint the completed layout as one clean frame instead.
-        RedrawWindow(
-            window_, nullptr, nullptr,
-            RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+        // Let Windows coalesce painting while the controls follow the frame
+        // immediately. Erasing here would repaint the complete UI per pixel.
+        InvalidateRect(window_, nullptr, FALSE);
     }
 
     void resize_columns() {
@@ -466,7 +602,12 @@ private:
         const int width = std::max(
             1, static_cast<int>(rect.right - rect.left) -
                GetSystemMetrics(SM_CXVSCROLL) - scale(4));
-        const std::array<int, 7> memory_weights{7, 10, 11, 11, 23, 18, 20};
+        if (last_column_client_width_ != 0 &&
+            std::abs(width - last_column_client_width_) < scale(8)) {
+            return;
+        }
+        last_column_client_width_ = width;
+        const std::array<int, 7> memory_weights{6, 9, 10, 10, 20, 27, 18};
         for (int i = 0; i < 7; ++i) {
             const auto index = static_cast<std::size_t>(i);
             const int column_width = width * memory_weights[index] / 100;
@@ -475,6 +616,12 @@ private:
                 memory_column_widths_[index] = column_width;
             }
         }
+        HWND memory_header = ListView_GetHeader(memory_list_);
+        update_header_tooltip(memory_header, 0, tooltip_memory_entry);
+        update_header_tooltip(memory_header, 3, tooltip_memory_density);
+        update_header_tooltip(memory_header, 4, tooltip_memory_organization);
+        update_header_tooltip(memory_header, 5, tooltip_memory_ramcfg);
+        update_header_tooltip(memory_header, 6, tooltip_memory_status);
 
         GetClientRect(timing_list_, &rect);
         const int timing_width = std::max(
@@ -489,6 +636,14 @@ private:
                 timing_column_widths_[index] = column_width;
             }
         }
+        HWND timing_header = ListView_GetHeader(timing_list_);
+        update_header_tooltip(timing_header, 0, tooltip_timing_range);
+        update_header_tooltip(timing_header, 1, tooltip_timing_mclk);
+        update_header_tooltip(timing_header, 2, tooltip_timing_clock);
+        update_header_tooltip(timing_header, 3, tooltip_timing_id);
+        update_header_tooltip(timing_header, 4, tooltip_timing_map_offset);
+        update_header_tooltip(timing_header, 5, tooltip_timing_record_offset);
+        update_header_tooltip(timing_header, 6, tooltip_timing_state);
     }
 
     void populate_document() {
@@ -501,6 +656,11 @@ private:
         set_text(file_value_, document_->path.filename().wstring() +
             L"  (" + std::to_wstring(document_->file_size) + L" bytes)");
         set_text(window_, L"NVIDIA BIOS Reader - " + document_->path.filename().wstring());
+        set_text(memory_caption_,
+            L"Memory Support  (" + std::to_wstring(document_->declared_memory_records) +
+            L" records / " + std::to_wstring(document_->described_memory_profiles) +
+            L" shown / " + std::to_wstring(document_->referenced_memory_profiles) +
+            L" referenced)");
         EnableWindow(save_button_, TRUE);
 
         ListView_DeleteAllItems(memory_list_);
@@ -572,7 +732,7 @@ private:
         descriptor << L"Descriptor: 0x" << std::uppercase << std::hex
                    << std::setw(8) << std::setfill(L'0') << memory.descriptor
                    << L"    ROM offset: " << hex_offset(memory.descriptor_offset)
-                   << L"    Physical straps: " << widen(memory.physical_straps);
+                   << L"    Physical straps: " << widen(memory.physical_straps_detail);
         set_text(descriptor_value_, descriptor.str());
 
         ListView_DeleteAllItems(timing_list_);
@@ -588,8 +748,8 @@ private:
             ListView_InsertItem(timing_list_, &item);
             set_list_text(timing_list_, row, 1, decimal_range(timing.raw_low, timing.raw_high));
             set_list_text(timing_list_, row, 2,
-                timing.unused ? L"Unused map slot" : displayed_range(
-                    timing.displayed_low_mhz, timing.displayed_high_mhz));
+                timing.unused ? L"Unused map slot" : device_clock_range(
+                    timing.device_low_mhz, timing.device_high_mhz));
             set_list_text(timing_list_, row, 3,
                 timing.timing_id ? std::to_wstring(*timing.timing_id) : L"FF");
             set_list_text(timing_list_, row, 4, hex_offset(timing.map_byte_offset));
@@ -858,11 +1018,13 @@ private:
     HWND decoded_caption_{};
     HWND decoded_value_{};
     HWND status_bar_{};
+    HWND tooltip_{};
     std::unique_ptr<nvbr::Document> document_;
     std::vector<std::size_t> visible_memory_;
     std::optional<std::size_t> selected_memory_;
     std::array<int, 7> memory_column_widths_{};
     std::array<int, 7> timing_column_widths_{};
+    int last_column_client_width_{};
 };
 
 } // namespace
@@ -872,7 +1034,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
 
     INITCOMMONCONTROLSEX common_controls{};
     common_controls.dwSize = sizeof(common_controls);
-    common_controls.dwICC = ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES | ICC_BAR_CLASSES;
+    common_controls.dwICC = ICC_WIN95_CLASSES | ICC_LISTVIEW_CLASSES |
+                            ICC_STANDARD_CLASSES | ICC_BAR_CLASSES;
     InitCommonControlsEx(&common_controls);
 
     Application application;

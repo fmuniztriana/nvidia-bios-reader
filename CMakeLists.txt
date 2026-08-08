@@ -1,11 +1,14 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(nvidia_bios_reader
-    VERSION 0.2.0
+    VERSION 0.3.0
     DESCRIPTION "Read-only NVIDIA VBIOS memory profile, strap, and timing analysis"
     HOMEPAGE_URL "https://github.com/fmuniztriana/nvidia-bios-reader"
     LANGUAGES CXX
 )
+
+set(NVBR_VERSION "${PROJECT_VERSION}-dev" CACHE STRING
+    "User-visible version string (set to the release version for release builds)")
 
 if(WIN32)
     enable_language(RC)
@@ -19,7 +22,7 @@ add_library(nvbr_core STATIC
 
 target_include_directories(nvbr_core PUBLIC include)
 target_compile_features(nvbr_core PUBLIC cxx_std_20)
-target_compile_definitions(nvbr_core PUBLIC NVBR_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(nvbr_core PUBLIC NVBR_VERSION="${NVBR_VERSION}")
 
 add_executable(nvidia-bios-reader-cli
     src/cli.cpp

@@ -1,6 +1,6 @@
 # NVIDIA BIOS Reader
 
-[![Version 0.2.0](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/fmuniztriana/nvidia-bios-reader/releases/tag/v0.2.0)
+[![Version 0.3.0](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/fmuniztriana/nvidia-bios-reader/releases/tag/v0.3.0)
 [![Build](https://github.com/fmuniztriana/nvidia-bios-reader/actions/workflows/build.yml/badge.svg)](https://github.com/fmuniztriana/nvidia-bios-reader/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -55,6 +55,7 @@ BIOS Reader was created to make that answer visible.
 - enumerate every Memory Information entry declared by the ROM;
 - report memory type, vendor, per-device density, and organization code;
 - map logical memory entries to physical strap selector values;
+- decode declared physical selectors as RAMCFG bits and STRAP2/1/0 L/M/H levels;
 - locate memory timing-map and timing-record tables;
 - classify each profile as `FULL`, `PARTIAL`, `EMPTY (all FF)`, or invalid;
 - show timing IDs and exact offsets for descriptors, map bytes, and records;
@@ -66,17 +67,19 @@ VBIOS editing and flashing are intentionally outside the current scope.
 
 ## Supported scope
 
-The parser has been exercised against real TU106, TU116, and GA102 ROMs. The
-underlying layouts are related across Turing, Ampere, and Ada, but untested
-chips must be treated as experimental until validated against multiple ROMs
-and independent tools.
+The parser has been exercised against real Turing, Ampere, and Ada ROMs. A
+local v0.3 regression set contained 116 unique NVIDIA ROM hashes covering
+TU102, TU104, TU106, TU116, TU117, GA102, GA104, GA106, AD102, and AD104. This
+proves parser coverage for those samples, not independent validation of every
+decoded field or physical board configuration.
 
 | Area | Current status |
 | --- | --- |
-| TU106 and TU116 memory profiles | Validated on multiple ROMs |
-| TU106 and TU116 GDDR6 timing maps | Validated on multiple ROMs |
-| GA102 GDDR6X memory profiles | Initial validation |
-| Other Turing, Ampere, and Ada chips | Experimental |
+| TU106 and TU116 GDDR6 memory/timing profiles | Validated on multiple ROMs |
+| TU102, TU104, and TU117 parsing | Regression exercised |
+| GA102, GA104, and GA106 parsing | Regression exercised; selected fields cross-validated |
+| AD102 and AD104 parsing | Regression exercised; experimental semantics |
+| Other Turing, Ampere, and Ada chips | Untested/experimental |
 | VBIOS editing or flashing | Not supported |
 
 See [Format and confidence notes](docs/format-notes.md) for the distinction
@@ -92,6 +95,10 @@ window. Select a memory entry to inspect its timing ranges and select a timing
 range to view the decoded CONFIG fields. **Save Report** writes the complete
 analysis to a text file. **About** shows the application version, author,
 project links, license, and independence notice.
+
+Hover over the Memory Support summary and the table headings for concise
+definitions of record counts, RAMCFG notation, timing-status classifications,
+clock ranges, and decoded CONFIG fields.
 
 The GUI uses native Win32 controls. It does not require Qt, .NET, or additional
 DLLs.
@@ -146,6 +153,9 @@ built. Set `NVBR_BUILD_GUI=OFF` to disable the GUI explicitly.
   device count, active strap, or the physical board population by itself.
 - An entry in Memory Support is a profile available to the firmware; it is not
   proof that the shipping board uses that profile.
+- The physical RAMCFG L/M/H codebook and the VBIOS translation table are
+  separate layers. Only mappings inside the table's declared count are shown
+  as referenced by that ROM.
 - `FULL` means every used frequency range references a present non-zero timing
   record for that memory group.
 - `PARTIAL` means at least one used range has a timing and at least one is
@@ -154,8 +164,9 @@ built. Set `NVBR_BUILD_GUI=OFF` to disable the GUI explicitly.
 - A `0-0` map slot is treated as unused and excluded from coverage.
 - Decoded CONFIG values are controller fields or cycle counts, not
   nanoseconds.
-- The displayed-clock conversion `raw / 4` is an observed convention and is
-  explicitly marked as inferred.
+- Timing ranges are shown in the NVIDIA/Afterburner MCLK domain. The
+  memory-device clock is explicitly marked as inferred and calculated as
+  `MCLK / 4` for GDDR6 or `MCLK / 8` for GDDR6X.
 - Organization labels such as clamshell describe the decoded profile and do
   not independently prove the physical topology of a particular board.
 

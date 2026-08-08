@@ -20,12 +20,12 @@ BEGIN
             VALUE "Comments", "https://github.com/fmuniztriana/nvidia-bios-reader\0"
             VALUE "CompanyName", "Felipe Muniz\0"
             VALUE "FileDescription", "@NVBR_FILE_DESCRIPTION@\0"
-            VALUE "FileVersion", "@PROJECT_VERSION@\0"
+            VALUE "FileVersion", "@NVBR_VERSION@\0"
             VALUE "InternalName", "@NVBR_INTERNAL_NAME@\0"
             VALUE "LegalCopyright", "Copyright (c) 2026 Felipe Muniz\0"
             VALUE "OriginalFilename", "@NVBR_ORIGINAL_FILENAME@\0"
             VALUE "ProductName", "NVIDIA BIOS Reader\0"
-            VALUE "ProductVersion", "@PROJECT_VERSION@\0"
+            VALUE "ProductVersion", "@NVBR_VERSION@\0"
         END
     END
     BLOCK "VarFileInfo"

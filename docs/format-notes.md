@@ -27,8 +27,10 @@ searching for isolated byte patterns.
 | Memory Information pointer | BIT memory token | Documented structure, cross-validated use |
 | Memory descriptor bit fields | First dword of each Memory Information record | Cross-validated/observed |
 | Physical strap mapping | Memory strap translation table | Cross-validated |
+| RAMCFG L/M/H codebook | NVIDIA board schematics and repeated board layouts | Cross-validated for the listed 0-15 codes |
 | Timing map and record pointers | BIT performance token | Documented structure, cross-validated use |
-| Displayed memory clock | Raw range divided by four | Inferred |
+| NVIDIA/Afterburner MCLK range | Timing-map low/high values | Observed/cross-validated |
+| Memory-device clock | MCLK divided by four for GDDR6 or eight for GDDR6X | Inferred/cross-validated against GPU-Z |
 | CONFIG0 through CONFIG5 names | Reverse-engineered field mapping | Observed |
 
 ## Memory descriptor
@@ -51,9 +53,65 @@ The descriptor's logical entry number is also used as a timing-map group index
 in the validated ROMs. The translation table maps physical strap values back
 to those logical entries.
 
+## Physical RAMCFG codebook
+
+NVIDIA boards can strap each of three selector inputs to low (`L`), midpoint
+(`M`), or high (`H`) voltage. Although three three-level inputs allow 27
+electrical combinations, the observed RAMCFG convention defines the following
+16-code subset. It is a codebook, not ordinary base-three counting.
+
+| Code | RAMCFG[4:0] | STRAP2 | STRAP1 | STRAP0 |
+| ---: | :---: | :---: | :---: | :---: |
+| 0 | `00000` | L | L | L |
+| 1 | `00001` | L | L | H |
+| 2 | `00010` | L | H | L |
+| 3 | `00011` | L | H | H |
+| 4 | `00100` | H | L | L |
+| 5 | `00101` | H | L | H |
+| 6 | `00110` | H | H | L |
+| 7 | `00111` | H | H | H |
+| 8 | `01000` | L | L | M |
+| 9 | `01001` | L | M | L |
+| 10 | `01010` | L | M | H |
+| 11 | `01011` | L | H | M |
+| 12 | `01100` | M | L | L |
+| 13 | `01101` | M | L | H |
+| 14 | `01110` | M | H | L |
+| 15 | `01111` | M | H | H |
+
+This electrical codebook and the VBIOS translation table are different
+layers. A code can exist electrically while being absent from a particular
+ROM's declared translation-table count. The reader reports only declared
+translation bytes as selectable mappings; it does not interpret adjacent ROM
+bytes as additional entries.
+
+The GUI therefore reports three separate counts: all records declared by the
+Memory Information table, non-`Skip` descriptors shown in the grid, and unique
+descriptors referenced by at least one declared physical translation code. A
+large record count does not by itself mean that every record is selectable or
+timing-complete. The compact grid label `Unmapped` means precisely "not
+referenced by the declared translation table"; the detailed view and report
+retain the longer wording.
+
 Density is per memory device. Neither density nor organization alone proves
 the total memory capacity or physical population of a board. In particular,
 an `x8` or clamshell-capable profile in the ROM may be an unused alternative.
+
+## Clock domains
+
+The timing-map low/high values correlate directly with the MCLK domain exposed
+by NVIDIA telemetry and MSI Afterburner. Different tools present the same
+physical memory using different clock conventions:
+
+| Memory type | NVIDIA/Afterburner MCLK | Device clock shown by GPU-Z | Effective data rate |
+| --- | ---: | ---: | ---: |
+| GDDR6 example | 7000 MHz | 1750 MHz (`MCLK / 4`) | 14000 Mb/s |
+| GDDR6X example | 11501 MHz | about 1437.6 MHz (`MCLK / 8`) | about 23002 Mb/s |
+
+The reader displays the firmware MCLK range directly and labels the converted
+device clock as inferred. Neither value is a P-state name, and a wide final
+range such as `8500-16383` is a selector interval rather than the claimed
+operating clock of the card.
 
 ## Timing coverage
 

@@ -111,6 +111,21 @@ Here physical straps 0 and 7 both select logical entry 0, while physical strap
 This table shows which profiles the firmware can select. It does not identify
 the active hardware strap in a saved ROM file.
 
+For the multilevel RAMCFG convention seen on the validated Turing and Ampere
+boards, decode physical values `0` through `15` as follows:
+
+```text
+ 0 L/L/L   1 L/L/H   2 L/H/L   3 L/H/H
+ 4 H/L/L   5 H/L/H   6 H/H/L   7 H/H/H
+ 8 L/L/M   9 L/M/L  10 L/M/H  11 L/H/M
+12 M/L/L  13 M/L/H  14 M/H/L  15 M/H/H
+```
+
+Keep the table length from the Memory token authoritative. For example, if it
+declares 14 entries, physical codes 0 through 13 are mapped; bytes immediately
+following them are not codes 14 and 15 merely because they contain plausible
+values.
+
 ## 5. Locate the timing map and timing records
 
 Return to the BIT tokens and find token `P` (`50` in ASCII). Follow its token
@@ -153,6 +168,13 @@ range + base length + (g * extended length)
 
 `FF` means that group has no timing record for that range. A `0-0` range is an
 unused slot and should not affect coverage classification.
+
+On the validated GDDR6/GDDR6X ROMs, these low/high limits correlate with the
+high MCLK domain reported by NVIDIA tools, MODS/NVMT, and MSI Afterburner. For
+comparison with the lower memory-device clock commonly shown by GPU-Z, the
+current reader infers `MCLK / 4` for GDDR6 and `MCLK / 8` for GDDR6X. Preserve
+the original range values when inspecting manually because these conversions
+are observational rather than part of the public table specification.
 
 ## 6. Resolve one timing ID
 

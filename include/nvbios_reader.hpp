@@ -10,7 +10,7 @@
 namespace nvbr {
 
 #ifndef NVBR_VERSION
-#define NVBR_VERSION "0.2.0-dev"
+#define NVBR_VERSION "0.3.0-dev"
 #endif
 
 inline constexpr const char* version = NVBR_VERSION;
@@ -25,8 +25,9 @@ struct TimingView {
     std::size_t range_index{};
     std::uint16_t raw_low{};
     std::uint16_t raw_high{};
-    double displayed_low_mhz{};
-    double displayed_high_mhz{};
+    double device_low_mhz{};
+    double device_high_mhz{};
+    double device_clock_divisor{1.0};
     bool unused{};
     std::optional<std::uint8_t> timing_id;
     std::size_t map_byte_offset{};
@@ -46,8 +47,17 @@ struct MemoryView {
     std::string density;
     std::string organization;
     std::string physical_straps;
+    std::string physical_straps_detail;
     std::string coverage;
     std::vector<TimingView> timings;
+};
+
+struct StrapTranslationView {
+    std::size_t physical_code{};
+    std::string ramcfg_bits;
+    std::string electrical_levels;
+    std::size_t target_group{};
+    bool valid_target{};
 };
 
 struct Document {
@@ -59,8 +69,13 @@ struct Document {
     std::string vbios_version;
     std::size_t bit_offset{};
     std::size_t memory_info_offset{};
+    std::size_t strap_translation_offset{};
     std::optional<std::size_t> timing_map_offset;
     std::optional<std::size_t> timing_table_offset;
+    std::size_t declared_memory_records{};
+    std::size_t described_memory_profiles{};
+    std::size_t referenced_memory_profiles{};
+    std::vector<StrapTranslationView> strap_translation;
     std::vector<MemoryView> memory;
     std::string report;
     std::string detailed_report;
