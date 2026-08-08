@@ -29,6 +29,14 @@ Do not rely on a filename as sample identity.
 6. Compare at least two vendors or densities before assigning semantics to a
    changing field.
 7. Mark any conclusion that depends on board behavior as observed or inferred.
+8. Compare complete timing records, not only decoded CONFIG0..CONFIG5 fields.
+9. Record both raw logical pointers and resolved physical file offsets.
+10. If runtime tools are used, preserve the exact tool hash and distinguish
+    requested geometry from successful memory training.
+11. For a claimed RAMCFG alias, confirm that both declared translation bytes
+    select the same group. Claim full runtime equivalence only after testing
+    both physical selectors on the same board and recording initialization,
+    training, and loaded-driver behavior.
 
 ## Regression corpus
 
@@ -47,6 +55,8 @@ Good regression coverage should include:
 - GDDR6X and clamshell-capable profiles;
 - malformed pointers and truncated tables using synthetic, redistributable
   fixtures.
+- equal decoded fields with different complete raw timing records;
+- logical pointers that require an intervening PCI-image adjustment.
 
 ## Publication standard
 

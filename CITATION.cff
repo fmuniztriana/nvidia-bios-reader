@@ -8,6 +8,6 @@ authors:
     alias: "fmuniztriana"
 repository-code: "https://github.com/fmuniztriana/nvidia-bios-reader"
 url: "https://github.com/fmuniztriana/nvidia-bios-reader"
-version: "0.3.0"
+version: "0.4.0-beta.1"
 date-released: 2026-08-08
 license: MIT

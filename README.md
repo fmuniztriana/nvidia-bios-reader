@@ -1,6 +1,6 @@
 # NVIDIA BIOS Reader
 
-[![Version 0.3.0](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/fmuniztriana/nvidia-bios-reader/releases/tag/v0.3.0)
+[![Version 0.4.0 beta 1](https://img.shields.io/badge/version-0.4.0--beta.1-orange.svg)](https://github.com/fmuniztriana/nvidia-bios-reader/releases)
 [![Build](https://github.com/fmuniztriana/nvidia-bios-reader/actions/workflows/build.yml/badge.svg)](https://github.com/fmuniztriana/nvidia-bios-reader/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -45,7 +45,8 @@ by a ROM, are all operating ranges actually backed by timing records? NVIDIA
 BIOS Reader was created to make that answer visible.
 
 > [!IMPORTANT]
-> This is an experimental reverse-engineering project. Several decoded fields
+> v0.4.0-beta.1 is a public research pre-release. This is an experimental
+> reverse-engineering project. Several decoded fields
 > are based on repeated observations across real ROMs rather than a complete
 > public NVIDIA specification. Inferred values are identified as such.
 
@@ -60,6 +61,13 @@ BIOS Reader was created to make that answer visible.
 - classify each profile as `FULL`, `PARTIAL`, `EMPTY (all FF)`, or invalid;
 - show timing IDs and exact offsets for descriptors, map bytes, and records;
 - decode the currently known CONFIG0 through CONFIG5 controller fields;
+- preserve, display, and CRC32-fingerprint every complete raw timing record;
+- compare two memory profiles byte by byte across every used clock range;
+- distinguish equal decoded fields from genuinely byte-identical records;
+- resolve selected memory, training, TMRS, clock, and tweak table pointers;
+- show raw logical pointers beside their resolved physical ROM offsets;
+- enumerate all 16 standard RAMCFG codes with translation-byte offsets,
+  logical targets, aliases, and outside-table states;
 - export a detailed plain-text report;
 - operate entirely read-only: the input ROM is never modified.
 
@@ -88,13 +96,27 @@ between directly parsed, observed, and inferred fields.
 For a byte-by-byte walkthrough using only a hex editor, see
 [Manual memory-table inspection](docs/manual-inspection.md).
 
+For the first static/runtime case study produced by the v0.4 research path,
+see [GA104 Samsung 8 Gbit versus 16 Gbit](docs/research/ga104-8gbit-vs-16gbit.md).
+
 ## Windows graphical interface
 
 Open `nvidia-bios-reader.exe`, choose **Open VBIOS**, or drag a ROM onto the
 window. Select a memory entry to inspect its timing ranges and select a timing
-range to view the decoded CONFIG fields. **Save Report** writes the complete
-analysis to a text file. **About** shows the application version, author,
+range to view the decoded CONFIG fields, complete raw record, and CRC32.
+**Save Report** writes the complete analysis and raw-record inventory to a
+text file. **About** shows the application version, author,
 project links, license, and independence notice.
+
+To compare profiles without a terminal, select the first Memory Support row,
+choose another entry in **Compare selected with**, and press **Compare**. The
+lower panel expands to show every range and changed byte. Use `Ctrl+A` and
+`Ctrl+C` to copy the comparison.
+
+Press **RAMCFG Map** to inspect the physical selector codebook separately from
+the logical Memory Support rows. The view identifies duplicate mappings such
+as RAMCFG 0 and 8 selecting the same entry, but does not claim which selector
+is physically active on the board.
 
 Hover over the Memory Support summary and the table headings for concise
 definitions of record counts, RAMCFG notation, timing-status classifications,
@@ -115,6 +137,19 @@ Include decoded timing fields:
 
 ```text
 nvidia-bios-reader-cli card.rom --timings
+```
+
+Compare two one-based Memory Support entries, including every byte in each
+referenced timing record:
+
+```text
+nvidia-bios-reader-cli card.rom --compare-profiles 1 7
+```
+
+Show the physical RAMCFG translation map:
+
+```text
+nvidia-bios-reader-cli card.rom --ramcfg
 ```
 
 Save a report:
@@ -147,6 +182,10 @@ On Windows with MSVC, the release executables use the static C++ runtime and
 can be distributed as standalone files. On non-Windows systems only the CLI is
 built. Set `NVBR_BUILD_GUI=OFF` to disable the GUI explicitly.
 
+See [Building NVIDIA BIOS Reader](docs/building.md) for beginner-friendly
+Windows, Ubuntu/Debian, Fedora, and Arch Linux instructions, pre-release
+versioning, installation, and binary compatibility notes.
+
 ## Interpretation rules
 
 - Density describes one memory device. It does not determine total VRAM,
@@ -157,13 +196,18 @@ built. Set `NVBR_BUILD_GUI=OFF` to disable the GUI explicitly.
   separate layers. Only mappings inside the table's declared count are shown
   as referenced by that ROM.
 - `FULL` means every used frequency range references a present non-zero timing
-  record for that memory group.
+  record for that memory group. It does not prove successful initialization,
+  memory training, P-state transitions, or hardware stability.
 - `PARTIAL` means at least one used range has a timing and at least one is
   `FF`.
 - `EMPTY (all FF)` means the descriptor exists but every used range is `FF`.
 - A `0-0` map slot is treated as unused and excluded from coverage.
 - Decoded CONFIG values are controller fields or cycle counts, not
   nanoseconds.
+- Decoded equality covers only bytes `+0x00..+0x17`. Two profiles can display
+  identical named timings while their complete records differ.
+- Bytes after `+0x17` remain unnamed unless independent evidence supports a
+  field interpretation.
 - Timing ranges are shown in the NVIDIA/Afterburner MCLK domain. The
   memory-device clock is explicitly marked as inferred and calculated as
   `MCLK / 4` for GDDR6 or `MCLK / 8` for GDDR6X.

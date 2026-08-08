@@ -14,9 +14,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - windows-latest
-          - ubuntu-latest
+        include:
+          - os: windows-latest
+            artifact: nvidia-bios-reader-windows-x64
+            paths: |
+              build/Release/nvidia-bios-reader.exe
+              build/Release/nvidia-bios-reader-cli.exe
+          - os: ubuntu-latest
+            artifact: nvidia-bios-reader-linux-x64
+            paths: build/nvidia-bios-reader-cli
 
     steps:
       - name: Check out repository
@@ -30,3 +36,10 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Upload tested binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.paths }}
+          if-no-files-found: error

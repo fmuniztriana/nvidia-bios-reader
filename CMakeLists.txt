@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(nvidia_bios_reader
-    VERSION 0.3.0
+    VERSION 0.4.0
     DESCRIPTION "Read-only NVIDIA VBIOS memory profile, strap, and timing analysis"
     HOMEPAGE_URL "https://github.com/fmuniztriana/nvidia-bios-reader"
     LANGUAGES CXX
 )
 
-set(NVBR_VERSION "${PROJECT_VERSION}-dev" CACHE STRING
+set(NVBR_VERSION "${PROJECT_VERSION}-beta.1" CACHE STRING
     "User-visible version string (set to the release version for release builds)")
 
 if(WIN32)

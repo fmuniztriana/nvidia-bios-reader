@@ -21,20 +21,35 @@ The parser currently follows this sequence:
 5. read the memory token, Memory Information table, and strap translation;
 6. locate the performance timing map and timing-record table;
 7. associate every memory profile and range with its timing record;
-8. generate concise and detailed text reports.
+8. preserve and fingerprint every complete raw timing record;
+9. resolve selected memory, training, TMRS, and performance pointers;
+10. build a 16-code physical RAMCFG view without reading beyond the declared
+    translation-table length;
+11. generate concise, detailed, comparison, and RAMCFG text reports.
 
 No parser function writes to the input file.
 
 ### Command-line interface
 
 `src/cli.cpp` handles arguments, calls `nvbr::inspect_vbios`, prints the chosen
-report, and optionally saves it. It contains no format-specific parsing.
+report, and optionally saves it. `--compare-profiles` compares the complete raw
+records already present in the public model, while `--ramcfg` renders the
+physical-to-logical map. Neither mode contains a separate format-specific
+parser.
 
 ### Windows graphical interface
 
 `src/gui.cpp` displays the same `nvbr::Document` data through native Win32
 controls. The GUI contains no separate VBIOS decoder and therefore should not
 produce results that differ from the CLI.
+
+The GUI calls the same public `compare_profiles` function as the CLI. It does
+not maintain a second comparison implementation. Selecting a range exposes its
+complete record and CRC32; selecting a comparison target exposes the complete
+per-range byte diff in the expandable lower pane.
+
+The RAMCFG button likewise calls the core `ramcfg_report` function used by the
+CLI, so aliases, invalid targets, and outside-table codes have one definition.
 
 ## Error handling
 

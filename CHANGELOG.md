@@ -14,6 +14,47 @@ and the project intends to follow [Semantic Versioning](https://semver.org/).
 - broader Turing, Ampere, and Ada validation;
 - additional read-only VBIOS tables.
 
+## [0.4.0-beta.1] - 2026-08-08
+
+Pre-release notes are available in
+[`docs/releases/v0.4.0-beta.1.md`](docs/releases/v0.4.0-beta.1.md).
+
+### Added
+
+- complete raw timing-record extraction using the table-declared stride;
+- CRC32 fingerprints for grouping byte-identical timing records;
+- `--compare-profiles A B` CLI mode with per-range and per-byte differences;
+- native GUI profile selection and complete per-byte comparison view;
+- GUI and CLI RAMCFG map with all 16 standard codes, exact translation-byte
+  offsets, target profiles, aliases, and outside-table states;
+- explicit detection of equal decoded CONFIG0..CONFIG5 fields whose complete
+  records still differ;
+- pointer map for memory, training, script, TMRS, performance, clock, tweak,
+  and power-sensor tables with raw and resolved offsets;
+- GUI display of the complete selected timing record;
+- detailed raw timing-record inventory in exported timing reports;
+- beginner-friendly Windows and Linux compilation guide;
+- reproducible GA104 Samsung 8/16 Gbit static/runtime case study.
+
+### Changed
+
+- clarified that `FULL` describes timing-map coverage only and cannot prove
+  boot, training, P-state, or hardware stability;
+- versioned the research line as `0.4.0-beta.1`;
+- documented post-legacy pointer adjustment when an intervening PCI image is
+  present;
+- preserved bytes after timing-record offset `+0x17` as explicitly unnamed
+  evidence instead of inferring field semantics.
+
+### Experimental findings
+
+- observed a persistent `+0x33 A2/A3` difference between one GA104 Samsung
+  8/16 Gbit profile pair despite equal decoded fields in six used ranges;
+- correlated density selection with geometry, MRS, electrical, command-map,
+  and calibration changes in a controlled physical-strap experiment;
+- documented why NVMT `ts/ts2` value `0x555` and `gddrinfo` output must not be
+  treated as universal GA104 GDDR6 failure indicators.
+
 ## [0.3.0] - 2026-08-08
 
 Release notes are available in

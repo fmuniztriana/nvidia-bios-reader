@@ -24,7 +24,7 @@ body:
     id: offsets
     attributes:
       label: Offsets and byte patterns
-      description: Include exact offsets, raw values, and how they were located.
+      description: Include source offsets, raw and resolved pointers, timing IDs, complete-record CRC32 values, relative changed-byte offsets, and how they were located.
     validations:
       required: true
 

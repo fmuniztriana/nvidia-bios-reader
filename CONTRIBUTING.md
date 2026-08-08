@@ -12,6 +12,10 @@ repeated observation, and hypothesis.
 3. Compare the result with at least one independent tool when possible.
 4. Remove serial numbers, local paths, and other private information.
 5. Do not attach a ROM unless you have permission to redistribute it.
+6. For timing-record findings, include the complete record size, CRC32,
+   record offset, and every changed byte offset.
+7. For pointer findings, distinguish the raw logical pointer from the resolved
+   physical ROM offset and record the PCI-image layout.
 
 Reports based on a public ROM should link to its original public page instead
 of adding the binary to the repository.
@@ -23,6 +27,9 @@ cmake -S . -B build
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
+
+Linux-specific package and build commands are documented in
+[`docs/building.md`](docs/building.md).
 
 The project is warning-clean at MSVC `/W4` and GCC/Clang
 `-Wall -Wextra -Wpedantic`. New code should remain warning-clean.

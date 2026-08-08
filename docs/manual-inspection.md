@@ -126,6 +126,13 @@ declares 14 entries, physical codes 0 through 13 are mapped; bytes immediately
 following them are not codes 14 and 15 merely because they contain plausible
 values.
 
+If two declared bytes contain the same logical target, describe the later
+physical code as a **translation alias** of the first. This proves only that
+the Memory Information/timing-map lookup converges on the same group. It does
+not prove that initialization scripts, runtime firmware, or electrical
+training ignore the original physical code. The reader exposes this procedure
+directly through the GUI **RAMCFG Map** button and the CLI `--ramcfg` option.
+
 ## 5. Locate the timing map and timing records
 
 Return to the BIT tokens and find token `P` (`50` in ASCII). Follow its token
@@ -140,6 +147,17 @@ These 32-bit pointers require extra care in some combined legacy/UEFI ROMs.
 When a raw pointer extends beyond the legacy image, the physical file offset
 may be shifted by the intervening UEFI image length. Confirm the table headers
 before treating a calculated offset as valid.
+
+For the validated GA104 sample, the practical calculation is:
+
+```text
+small pointer: file = legacy base + raw pointer
+large pointer: file = legacy base + raw pointer + intervening UEFI length
+```
+
+Do not assume that the legacy image begins at zero or that the UEFI image has a
+fixed size. Read both PCI image headers. The CLI pointer map prints the source
+byte, raw pointer, resolved offset, and whether an adjustment was applied.
 
 The compatible timing map begins with:
 
@@ -194,7 +212,9 @@ timing table + header length + (n * record stride)
 Verify that `n` is lower than the declared record count and that the complete
 record remains inside the ROM. The current reader decodes selected bit fields
 from the first 24 bytes as CONFIG0 through CONFIG5, while preserving the exact
-record offset for manual comparison.
+record offset for manual comparison. In the GA104 sample, the declared stride
+is 76 bytes; always use the stride declared by the ROM rather than hard-coding
+76 for another generation.
 
 ## 7. Decide whether a profile is full
 
@@ -208,3 +228,30 @@ For one logical memory entry, read its timing ID in every used frequency range:
 This identifies table completeness, not runtime stability. Memory training,
 voltage, P-state transitions, and physical memory characteristics remain
 separate questions.
+
+## 8. Compare complete records
+
+Two profiles are not equivalent merely because their decoded CONFIG0..CONFIG5
+text matches. Select the same used clock range in both profiles, resolve both
+timing IDs, and compare the complete `record stride` bytes.
+
+Record differences should be written relative to each record start:
+
+```text
++0x2C: 0A -> 4A
++0x2D: 04 -> 03
++0x2E: 00 -> 90
++0x33: A2 -> A3
+```
+
+This notation remains useful when the two records reside at different file
+offsets or use different timing IDs. Do not name an unknown field from one
+correlation. Record the vendor, density, organization, VBIOS hash, range,
+timing IDs, record offsets, and all changed bytes so another contributor can
+test the hypothesis independently.
+
+The CLI automates the same procedure:
+
+```text
+nvidia-bios-reader-cli card.rom --compare-profiles 1 7
+```

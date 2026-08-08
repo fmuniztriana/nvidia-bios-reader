@@ -130,6 +130,17 @@ struct TimingTable {
     std::size_t stride{};
 };
 
+struct TablePointer {
+    std::string name;
+    std::string source;
+    std::size_t source_offset{};
+    std::uint32_t raw_pointer{};
+    std::size_t resolved_offset{};
+    bool adjusted_for_intervening_image{};
+    bool in_file{};
+    std::string confidence;
+};
+
 struct TimingFields {
     std::uint32_t rc{};
     std::uint32_t rfc{};
@@ -170,6 +181,8 @@ struct Analysis {
     std::optional<std::size_t> timing_map_offset;
     std::vector<TimingRange> timing_ranges;
     std::optional<TimingTable> timing_table;
+    std::size_t intervening_image_length{};
+    std::vector<TablePointer> table_pointers;
 };
 
 [[nodiscard]] std::uint32_t field(
@@ -417,6 +430,31 @@ void parse_info(
     return static_cast<std::size_t>(raw) + (raw > legacy_length ? uefi_length : 0U);
 }
 
+void add_table_pointer(
+    Analysis& result,
+    const Bytes& rom,
+    const PciImage& legacy,
+    std::string name,
+    std::string source,
+    std::size_t source_offset,
+    std::uint32_t raw_pointer,
+    std::string confidence) {
+    const bool adjusted = raw_pointer > legacy.length &&
+        result.intervening_image_length != 0;
+    const std::size_t resolved = legacy.base + adjusted_pointer(
+        raw_pointer, legacy.length, result.intervening_image_length);
+    result.table_pointers.push_back(TablePointer{
+        std::move(name),
+        std::move(source),
+        source_offset,
+        raw_pointer,
+        resolved,
+        adjusted,
+        resolved < rom.size(),
+        std::move(confidence),
+    });
+}
+
 void parse_memory(
     const Bytes& rom,
     const PciImage& legacy,
@@ -437,6 +475,43 @@ void parse_memory(
     const std::uint16_t memory_info_pointer = rom.u16(token_offset + 3);
     result.translation_offset = legacy.base + translation_pointer;
     result.memory_info_offset = legacy.base + memory_info_pointer;
+
+    add_table_pointer(
+        result, rom, legacy, "Memory Strap Translation Table", "BIT M token",
+        token_offset + 1, translation_pointer, "Documented/cross-validated");
+    add_table_pointer(
+        result, rom, legacy, "Memory Information Table", "BIT M token",
+        token_offset + 3, memory_info_pointer, "Documented/cross-validated");
+
+    struct MemoryPointerField {
+        std::size_t token_offset;
+        const char* name;
+        const char* confidence;
+    };
+    static constexpr std::array<MemoryPointerField, 9> pointer_fields{{
+        {5, "Memory Training Table", "Observed; name cross-validated with NVMT"},
+        {9, "Memory Training Pattern Table", "Observed; name cross-validated with NVMT"},
+        {13, "Memory Partition Information Table", "Observed; name cross-validated with NVMT"},
+        {17, "Memory Script List", "Observed; name cross-validated with NVMT"},
+        {21, "Memory Bootup Training", "Observed; name cross-validated with NVMT"},
+        {25, "TMRS Sequence List Table", "Observed; name cross-validated with NVMT"},
+        {29, "TMRS Sequence Table", "Observed; name cross-validated with NVMT"},
+        {33, "TMRS Code Table", "Observed; name cross-validated with NVMT"},
+        {37, "Unknown Memory Pointer 8", "Unknown; preserved as raw data"},
+    }};
+    for (const auto& pointer_field : pointer_fields) {
+        if (token.length < pointer_field.token_offset + 4) {
+            continue;
+        }
+        const std::size_t source_offset = token_offset + pointer_field.token_offset;
+        const std::uint32_t raw_pointer = rom.u32(source_offset);
+        if (raw_pointer == 0) {
+            continue;
+        }
+        add_table_pointer(
+            result, rom, legacy, pointer_field.name, "BIT M token",
+            source_offset, raw_pointer, pointer_field.confidence);
+    }
 
     result.translation.reserve(group_count);
     for (std::size_t i = 0; i < group_count; ++i) {
@@ -499,6 +574,29 @@ void parse_timings(
         return;
     }
     const std::size_t performance_offset = legacy.base + found->second.pointer;
+    struct PerformancePointerField {
+        std::size_t token_offset;
+        const char* name;
+    };
+    static constexpr std::array<PerformancePointerField, 4> pointer_fields{{
+        {0, "Performance Table"},
+        {4, "Memory Clock Table / timing map"},
+        {8, "Memory Tweak Table / timing records"},
+        {0x28, "Power Sensors Table"},
+    }};
+    for (const auto& pointer_field : pointer_fields) {
+        if (found->second.length < pointer_field.token_offset + 4) {
+            continue;
+        }
+        const std::size_t source_offset = performance_offset + pointer_field.token_offset;
+        const std::uint32_t raw_pointer = rom.u32(source_offset);
+        if (raw_pointer == 0) {
+            continue;
+        }
+        add_table_pointer(
+            result, rom, legacy, pointer_field.name, "BIT P token",
+            source_offset, raw_pointer, "Observed/cross-validated");
+    }
     const std::uint32_t timing_map_raw = rom.u32(performance_offset + 4);
     const std::uint32_t timing_table_raw = rom.u32(performance_offset + 8);
     const std::size_t uefi_length = uefi_length_after_legacy(result.pci_images, legacy);
@@ -574,6 +672,35 @@ void parse_timings(
     };
 }
 
+[[nodiscard]] std::uint32_t crc32(std::span<const std::uint8_t> bytes) {
+    std::uint32_t crc = 0xFFFFFFFFU;
+    for (const std::uint8_t byte : bytes) {
+        crc ^= byte;
+        for (int bit = 0; bit < 8; ++bit) {
+            const std::uint32_t mask = 0U - (crc & 1U);
+            crc = (crc >> 1U) ^ (0xEDB88320U & mask);
+        }
+    }
+    return ~crc;
+}
+
+[[nodiscard]] std::string raw_record_hex(
+    std::span<const std::uint8_t> bytes,
+    std::string_view line_prefix = {}) {
+    std::ostringstream out;
+    out << std::uppercase << std::hex << std::setfill('0');
+    for (std::size_t offset = 0; offset < bytes.size(); offset += 16) {
+        if (offset != 0) out << '\n';
+        out << line_prefix << "+0x" << std::setw(2) << offset << ": ";
+        const std::size_t count = std::min<std::size_t>(16, bytes.size() - offset);
+        for (std::size_t i = 0; i < count; ++i) {
+            if (i != 0) out << ' ';
+            out << std::setw(2) << static_cast<unsigned>(bytes[offset + i]);
+        }
+    }
+    return out.str();
+}
+
 [[nodiscard]] bool timing_record_is_zero(
     const Bytes& rom, const TimingTable& table, std::uint8_t id) {
     if (id >= table.record_count) {
@@ -631,6 +758,8 @@ void parse_timings(
         throw ParseError("No NVIDIA legacy PCI expansion ROM image was found");
     }
     result.legacy = *legacy;
+    result.intervening_image_length = uefi_length_after_legacy(
+        result.pci_images, result.legacy);
     result.bit_offset = find_bit(rom, result.legacy);
     const auto tokens = parse_bit_tokens(rom, result.bit_offset);
     parse_info(rom, result.legacy, tokens, result);
@@ -727,21 +856,58 @@ void parse_timings(
     } else {
         out << "unavailable";
     }
-    out << "\n\nPhysical RAMCFG translation\n"
+    out << "\nIntervening image adjustment: "
+        << hex_value(analysis.intervening_image_length)
+        << " bytes when a logical pointer is beyond the legacy image\n"
+        << "\nPointer map\n"
+        << "-----------\n";
+    for (const auto& pointer : analysis.table_pointers) {
+        out << pointer.name << '\n'
+            << "  Source:          " << pointer.source << " @ "
+            << hex_value(pointer.source_offset) << '\n'
+            << "  Raw pointer:     " << hex_value(pointer.raw_pointer) << '\n'
+            << "  Resolved offset: " << hex_value(pointer.resolved_offset);
+        if (pointer.adjusted_for_intervening_image) {
+            out << " (includes " << hex_value(analysis.intervening_image_length)
+                << "-byte intervening image)";
+        }
+        if (!pointer.in_file) out << " (outside file)";
+        out << '\n' << "  Confidence:      " << pointer.confidence << '\n';
+    }
+
+    out << "\nPhysical RAMCFG translation\n"
         << "---------------------------\n";
-    for (std::size_t physical = 0; physical < analysis.translation.size(); ++physical) {
-        const std::size_t target = analysis.translation[physical];
+    constexpr std::size_t standard_ramcfg_count = 16;
+    for (std::size_t physical = 0; physical < standard_ramcfg_count; ++physical) {
         out << "Physical " << physical
             << " / RAMCFG " << ramcfg_bits(physical)
-            << " / " << strap_levels(physical)
+            << " / " << strap_levels(physical);
+        if (physical >= analysis.translation.size()) {
+            out << " -> outside declared translation table\n";
+            continue;
+        }
+        const std::size_t target = analysis.translation[physical];
+        out << " / byte @ " << hex_value(analysis.translation_offset + physical)
             << " -> group " << target;
         if (target < analysis.memory_entries.size()) {
-            out << " (entry " << (target + 1) << ')';
+            const auto& entry = analysis.memory_entries[target];
+            out << " (entry " << (target + 1) << ": "
+                << entry.vendor << ' ' << entry.memory_type << ' '
+                << entry.density << ' ' << entry.organization << ')';
         } else {
             out << " (invalid target)";
         }
+        const auto alias = std::find(
+            analysis.translation.begin(),
+            analysis.translation.begin() + static_cast<std::ptrdiff_t>(physical),
+            static_cast<std::uint8_t>(target));
+        if (alias != analysis.translation.begin() + static_cast<std::ptrdiff_t>(physical)) {
+            out << " / alias of physical "
+                << static_cast<std::size_t>(std::distance(analysis.translation.begin(), alias));
+        }
         out << '\n';
     }
+    out << "Active physical RAMCFG: unknown from a saved ROM file\n";
 
     out << "\nMemory support\n"
         << "--------------\n";
@@ -832,12 +998,36 @@ void parse_timings(
         out << '\n';
     }
 
+    if (show_decoded_timings && analysis.timing_table) {
+        const auto& table = *analysis.timing_table;
+        out << "Raw timing record inventory (experimental)\n"
+            << "------------------------------------------\n"
+            << "The complete " << table.stride
+            << "-byte records are preserved below. Only the first 24 bytes are\n"
+            << "currently decoded as CONFIG0..CONFIG5; later bytes remain unnamed.\n\n";
+        for (std::size_t id = 0; id < table.record_count; ++id) {
+            const std::size_t offset = table.offset + table.header_length + id * table.stride;
+            const auto raw = rom.slice(offset, table.stride);
+            out << "Timing ID " << id << " @ " << hex_value(offset)
+                << " / CRC32 " << hex_value(crc32(raw), 8);
+            if (std::all_of(raw.begin(), raw.end(), [](std::uint8_t byte) {
+                    return byte == 0;
+                })) {
+                out << " / all zero";
+            }
+            out << '\n' << raw_record_hex(raw, "  ") << "\n\n";
+        }
+    }
+
     out << "Notes\n"
         << "-----\n"
         << "- Density is per memory device; total VRAM cannot be derived from this descriptor alone.\n"
         << "- L/M/H describes the standard multilevel RAMCFG codebook; M is the midpoint voltage.\n"
         << "- Only physical codes inside the VBIOS-declared translation-table count are selectable mappings.\n"
         << "- Timing values are memory-controller register fields/cycle counts, not nanoseconds.\n"
+        << "- FULL describes timing-map coverage only; it does not prove boot, training, or P-state stability.\n"
+        << "- CRC32 groups byte-identical raw records; it is an identification aid, not a security hash.\n"
+        << "- Bytes after record +0x17 are preserved as unknown unless separately documented.\n"
         << "- Timing-map ranges use the NVIDIA/Afterburner MCLK domain; device clock is inferred as MCLK/4 for GDDR6 and MCLK/8 for GDDR6X.\n"
         << "- This tool reads the ROM only and never modifies it.\n";
     return out.str();
@@ -869,12 +1059,18 @@ Document inspect_vbios(const fs::path& path) {
     document.device_id = hex_value(analysis.legacy.device, 4);
     document.vendor_id = hex_value(analysis.legacy.vendor, 4);
     document.vbios_version = analysis.vbios_version;
+    document.legacy_image_base = analysis.legacy.base;
+    document.legacy_image_length = analysis.legacy.length;
+    document.intervening_image_length = analysis.intervening_image_length;
     document.bit_offset = analysis.bit_offset;
+    document.memory_token_offset = analysis.memory_token_offset;
     document.memory_info_offset = analysis.memory_info_offset;
     document.strap_translation_offset = analysis.translation_offset;
     document.timing_map_offset = analysis.timing_map_offset;
     if (analysis.timing_table) {
         document.timing_table_offset = analysis.timing_table->offset;
+        document.timing_record_size = analysis.timing_table->stride;
+        document.timing_record_count = analysis.timing_table->record_count;
     }
     document.declared_memory_records = analysis.memory_entries.size();
     document.described_memory_profiles = static_cast<std::size_t>(std::count_if(
@@ -886,15 +1082,53 @@ Document inspect_vbios(const fs::path& path) {
             return entry.memory_type_code != 0xF && !entry.physical_straps.empty();
         }));
 
-    document.strap_translation.reserve(analysis.translation.size());
-    for (std::size_t physical = 0; physical < analysis.translation.size(); ++physical) {
-        const std::size_t target = analysis.translation[physical];
-        document.strap_translation.push_back(StrapTranslationView{
-            physical,
-            ramcfg_bits(physical),
-            strap_levels(physical),
-            target,
-            target < analysis.memory_entries.size(),
+    constexpr std::size_t standard_ramcfg_count = 16;
+    document.strap_translation.reserve(standard_ramcfg_count);
+    for (std::size_t physical = 0; physical < standard_ramcfg_count; ++physical) {
+        StrapTranslationView view;
+        view.physical_code = physical;
+        view.ramcfg_bits = ramcfg_bits(physical);
+        view.electrical_levels = strap_levels(physical);
+        view.declared = physical < analysis.translation.size();
+        if (view.declared) {
+            view.translation_byte_offset = analysis.translation_offset + physical;
+            const std::size_t target = analysis.translation[physical];
+            view.target_group = target;
+            view.valid_target = target < analysis.memory_entries.size();
+            const auto alias = std::find(
+                analysis.translation.begin(),
+                analysis.translation.begin() + static_cast<std::ptrdiff_t>(physical),
+                static_cast<std::uint8_t>(target));
+            if (alias != analysis.translation.begin() + static_cast<std::ptrdiff_t>(physical)) {
+                view.alias_of_physical_code = static_cast<std::size_t>(
+                    std::distance(analysis.translation.begin(), alias));
+            }
+            if (view.valid_target) {
+                const auto& entry = analysis.memory_entries[target];
+                view.target_entry_number = target + 1;
+                view.target_type = entry.memory_type;
+                view.target_vendor = entry.vendor;
+                view.target_density = entry.density;
+                view.target_organization = entry.organization;
+                view.timing_coverage = entry.memory_type_code == 0xF
+                    ? "N/A"
+                    : timing_status(rom, analysis, target);
+            }
+        }
+        document.strap_translation.push_back(std::move(view));
+    }
+
+    document.table_pointers.reserve(analysis.table_pointers.size());
+    for (const auto& pointer : analysis.table_pointers) {
+        document.table_pointers.push_back(TablePointerView{
+            pointer.name,
+            pointer.source,
+            pointer.source_offset,
+            pointer.raw_pointer,
+            pointer.resolved_offset,
+            pointer.adjusted_for_intervening_image,
+            pointer.in_file,
+            pointer.confidence,
         });
     }
 
@@ -941,6 +1175,10 @@ Document inspect_vbios(const fs::path& path) {
                             timing.timing_record_offset = offset;
                             timing.all_zero_record = timing_record_is_zero(
                                 rom, *analysis.timing_table, id);
+                            const auto raw = rom.slice(offset, analysis.timing_table->stride);
+                            timing.raw_record.assign(raw.begin(), raw.end());
+                            timing.raw_record_hex = raw_record_hex(raw);
+                            timing.raw_record_crc32 = hex_value(crc32(raw), 8);
                             if (analysis.timing_table->stride >= 24) {
                                 timing.decoded_fields = timing_fields_text(
                                     decode_timing_fields(rom, offset));
@@ -957,6 +1195,181 @@ Document inspect_vbios(const fs::path& path) {
     document.report = build_report(analysis, rom, false);
     document.detailed_report = build_report(analysis, rom, true);
     return document;
+}
+
+std::string compare_profiles(
+    const Document& document,
+    std::size_t first_entry_number,
+    std::size_t second_entry_number) {
+    const auto find_entry = [&](std::size_t number) -> const MemoryView& {
+        const auto found = std::find_if(
+            document.memory.begin(), document.memory.end(),
+            [number](const MemoryView& memory) {
+                return memory.entry_number == number;
+            });
+        if (found == document.memory.end()) {
+            throw std::runtime_error(
+                "Memory entry " + std::to_string(number) + " does not exist");
+        }
+        if (found->skipped) {
+            throw std::runtime_error(
+                "Memory entry " + std::to_string(number) + " is a Skip descriptor");
+        }
+        return *found;
+    };
+
+    const MemoryView& first = find_entry(first_entry_number);
+    const MemoryView& second = find_entry(second_entry_number);
+    std::ostringstream out;
+    out << "NVIDIA BIOS Reader profile comparison " << version << "\n"
+        << "===============================================\n\n"
+        << "ROM: " << document.path.string() << '\n'
+        << "Entry " << first.entry_number << ": " << first.vendor << ' '
+        << first.type << ' ' << first.density << ' ' << first.organization << '\n'
+        << "  Physical RAMCFG: " << first.physical_straps_detail << '\n'
+        << "Entry " << second.entry_number << ": " << second.vendor << ' '
+        << second.type << ' ' << second.density << ' ' << second.organization << '\n'
+        << "  Physical RAMCFG: " << second.physical_straps_detail << "\n\n";
+
+    const std::size_t range_count = std::max(first.timings.size(), second.timings.size());
+    std::size_t comparable = 0;
+    std::size_t decoded_equal = 0;
+    std::size_t raw_equal = 0;
+    std::size_t raw_different = 0;
+    for (std::size_t index = 0; index < range_count; ++index) {
+        const TimingView* a = index < first.timings.size() ? &first.timings[index] : nullptr;
+        const TimingView* b = index < second.timings.size() ? &second.timings[index] : nullptr;
+        const std::size_t range_index = a ? a->range_index : (b ? b->range_index : index);
+        out << "Range " << range_index;
+        if (a) out << " / MCLK " << a->raw_low << '-' << a->raw_high << " MHz";
+        out << '\n';
+        if (!a || !b) {
+            out << "  Result: range is missing from one profile\n\n";
+            continue;
+        }
+        if (a->unused && b->unused) {
+            out << "  Result: unused map slot\n\n";
+            continue;
+        }
+        const auto describe = [](const TimingView& timing) {
+            if (!timing.timing_id) return std::string("FF / no record");
+            if (!timing.timing_record_offset) return std::string("invalid reference");
+            std::ostringstream text;
+            text << "ID " << static_cast<unsigned>(*timing.timing_id)
+                 << " @ " << hex_value(*timing.timing_record_offset)
+                 << " / CRC32 " << timing.raw_record_crc32;
+            return text.str();
+        };
+        out << "  Entry " << first.entry_number << ": " << describe(*a) << '\n'
+            << "  Entry " << second.entry_number << ": " << describe(*b) << '\n';
+        if (a->raw_record.empty() || b->raw_record.empty()) {
+            out << "  Result: raw records are not comparable\n\n";
+            continue;
+        }
+        ++comparable;
+        const bool fields_equal = a->decoded_fields == b->decoded_fields;
+        if (fields_equal) ++decoded_equal;
+        const bool records_equal = a->raw_record == b->raw_record;
+        if (records_equal) {
+            ++raw_equal;
+            out << "  Decoded CONFIG0..CONFIG5: "
+                << (fields_equal ? "IDENTICAL" : "DIFFERENT") << '\n'
+                << "  Complete raw record: IDENTICAL\n\n";
+            continue;
+        }
+        ++raw_different;
+        out << "  Decoded CONFIG0..CONFIG5: "
+            << (fields_equal ? "IDENTICAL" : "DIFFERENT") << '\n'
+            << "  Complete raw record: DIFFERENT\n"
+            << "  Differing bytes:";
+        const std::size_t byte_count = std::max(
+            a->raw_record.size(), b->raw_record.size());
+        std::size_t difference_count = 0;
+        for (std::size_t byte = 0; byte < byte_count; ++byte) {
+            const bool in_a = byte < a->raw_record.size();
+            const bool in_b = byte < b->raw_record.size();
+            if (in_a && in_b && a->raw_record[byte] == b->raw_record[byte]) {
+                continue;
+            }
+            ++difference_count;
+            out << "\n    +0x" << std::uppercase << std::hex << std::setw(2)
+                << std::setfill('0') << byte << ": ";
+            if (in_a) out << std::setw(2) << static_cast<unsigned>(a->raw_record[byte]);
+            else out << "--";
+            out << " -> ";
+            if (in_b) out << std::setw(2) << static_cast<unsigned>(b->raw_record[byte]);
+            else out << "--";
+            out << std::dec << std::setfill(' ');
+        }
+        out << "\n  Difference count: " << difference_count << " byte(s)\n\n";
+    }
+
+    out << "Summary\n"
+        << "-------\n"
+        << "Comparable used ranges: " << comparable << '\n'
+        << "Decoded CONFIG0..CONFIG5 equal: " << decoded_equal << '\n'
+        << "Complete raw records equal: " << raw_equal << '\n'
+        << "Complete raw records different: " << raw_different << "\n\n"
+        << "Interpretation: decoded equality covers only the first 24 bytes. Raw\n"
+        << "differences after +0x17 are preserved as unknown and must not be named\n"
+        << "without independent evidence. FULL timing coverage does not prove\n"
+        << "hardware initialization or P-state stability.\n";
+    return out.str();
+}
+
+std::string ramcfg_report(const Document& document) {
+    const std::size_t declared_count = static_cast<std::size_t>(std::count_if(
+        document.strap_translation.begin(), document.strap_translation.end(),
+        [](const StrapTranslationView& mapping) { return mapping.declared; }));
+    std::ostringstream out;
+    out << "NVIDIA BIOS Reader physical RAMCFG map " << version << "\n"
+        << "===============================================\n\n"
+        << "ROM: " << document.path.string() << '\n'
+        << "Translation table: " << hex_value(document.strap_translation_offset)
+        << " / " << declared_count << " declared physical codes\n"
+        << "Active physical RAMCFG: unknown from a saved ROM file\n\n";
+
+    for (const auto& mapping : document.strap_translation) {
+        out << "RAMCFG " << mapping.physical_code
+            << " / " << mapping.ramcfg_bits
+            << " / " << mapping.electrical_levels << '\n';
+        if (!mapping.declared) {
+            out << "  State: outside the VBIOS-declared translation table\n\n";
+            continue;
+        }
+        out << "  Translation byte: " << hex_value(*mapping.translation_byte_offset)
+            << '\n';
+        if (!mapping.valid_target || !mapping.target_group) {
+            out << "  State: invalid translation target\n\n";
+            continue;
+        }
+        out << "  Target: group " << *mapping.target_group;
+        if (mapping.target_entry_number) {
+            out << " / entry " << *mapping.target_entry_number;
+        }
+        out << '\n';
+        if (mapping.alias_of_physical_code) {
+            out << "  Alias: same logical target as RAMCFG "
+                << *mapping.alias_of_physical_code << '\n';
+        } else {
+            out << "  Alias: primary declared mapping for this target\n";
+        }
+        out << "  Profile: " << mapping.target_vendor << ' '
+            << mapping.target_type << ' ' << mapping.target_density << ' '
+            << mapping.target_organization << '\n'
+            << "  Timing coverage: " << mapping.timing_coverage << "\n\n";
+    }
+
+    out << "Interpretation\n"
+        << "--------------\n"
+        << "RAMCFG is the physical selector code produced by the board-level strap\n"
+        << "inputs. The translation byte maps that code to a zero-based logical\n"
+        << "Memory Information/timing-map group. Multiple physical codes can be\n"
+        << "aliases of the same logical profile. Alias means equal translation\n"
+        << "target in this ROM; it does not yet prove that every initialization\n"
+        << "script ignores the original physical code. L/M/H are codebook labels,\n"
+        << "not measured voltages from the ROM.\n";
+    return out.str();
 }
 
 } // namespace nvbr

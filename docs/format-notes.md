@@ -29,6 +29,8 @@ searching for isolated byte patterns.
 | Physical strap mapping | Memory strap translation table | Cross-validated |
 | RAMCFG L/M/H codebook | NVIDIA board schematics and repeated board layouts | Cross-validated for the listed 0-15 codes |
 | Timing map and record pointers | BIT performance token | Documented structure, cross-validated use |
+| Complete timing-record bytes and CRC32 | Declared timing-table geometry | Cross-validated raw extraction |
+| Post-legacy pointer adjustment | PCI image layout plus observed logical offsets | Observed/cross-validated |
 | NVIDIA/Afterburner MCLK range | Timing-map low/high values | Observed/cross-validated |
 | Memory-device clock | MCLK divided by four for GDDR6 or eight for GDDR6X | Inferred/cross-validated against GPU-Z |
 | CONFIG0 through CONFIG5 names | Reverse-engineered field mapping | Observed |
@@ -93,6 +95,17 @@ timing-complete. The compact grid label `Unmapped` means precisely "not
 referenced by the declared translation table"; the detailed view and report
 retain the longer wording.
 
+The RAMCFG map always displays the 16 standard codebook values while keeping
+the translation table's declared count authoritative. Codes beyond that count
+are labeled `outside declared table` and are never read from adjacent bytes.
+Each declared mapping reports the exact translation-byte offset. When two
+physical codes contain the same target byte, later occurrences are labeled as
+aliases of the first declared code.
+
+Alias currently means only "same translation target in this ROM." It does not
+yet prove that every firmware script ignores the original physical code. The
+active physical RAMCFG cannot be recovered from a saved ROM file alone.
+
 Density is per memory device. Neither density nor organization alone proves
 the total memory capacity or physical population of a board. In particular,
 an `x8` or clamshell-capable profile in the ROM may be an unused alternative.
@@ -141,6 +154,56 @@ These are raw memory-controller values or cycle counts. Comparing two profiles
 at the same clock can be useful, but smaller is not universally "better": some
 fields encode delays differently, training behavior also matters, and not all
 record bytes have been decoded.
+
+## Complete timing records
+
+The timing-table header declares the complete record stride. In the validated
+GA104 sample documented for v0.4.0-beta.1, each record is 76 bytes. The reader
+preserves every byte even though only offsets `+0x00` through `+0x17` currently
+have named CONFIG0..CONFIG5 fields.
+
+CRC32 fingerprints are used to group byte-identical records and make
+cross-report comparisons convenient. CRC32 is not a cryptographic identity;
+ROM samples must still be identified by SHA-256.
+
+The profile comparator distinguishes:
+
+- decoded fields equal and complete records equal;
+- decoded fields equal but complete records different;
+- decoded fields and complete records different;
+- records that cannot be compared because a map entry is `FF` or invalid.
+
+Bytes after `+0x17` remain explicitly unknown. A repeating correlation such as
+the observed `+0x33 A2/A3` difference between one GA104 Samsung 8/16 Gbit pair
+is evidence for further study, not enough evidence to assign a field name.
+
+## Pointer address domains
+
+BIT table pointers are logical offsets associated with the NVIDIA legacy
+image. A physical ROM file can contain another PCI image between the legacy
+image and later data tables. Consequently, a raw pointer printed by firmware
+tools is not always the same as a file offset.
+
+The currently observed resolution rule is:
+
+```text
+resolved = legacy image base + raw pointer
+```
+
+For a logical pointer beyond the declared legacy-image length, when an
+immediately following UEFI PCI image is present:
+
+```text
+resolved = legacy image base + raw pointer + intervening UEFI image length
+```
+
+The reader reports the raw pointer, the byte that stores it, the resolved file
+offset, whether the intervening image adjustment was applied, and a confidence
+label. This rule is bounds-checked and validated on the current corpus, but
+unusual multi-image layouts should be treated as experimental.
+
+See the [GA104 8/16 Gbit case study](research/ga104-8gbit-vs-16gbit.md)
+for a worked example.
 
 ## Public references
 

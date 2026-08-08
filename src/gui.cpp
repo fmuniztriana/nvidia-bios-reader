@@ -32,9 +32,12 @@ constexpr wchar_t window_class_name[] = L"NvidiaBiosReaderWindow";
 constexpr UINT command_open = 1001;
 constexpr UINT command_save = 1002;
 constexpr UINT command_about = 1003;
+constexpr UINT command_compare = 1004;
+constexpr UINT command_ramcfg = 1005;
 constexpr UINT control_memory = 1101;
 constexpr UINT control_timings = 1102;
 constexpr UINT control_status = 1103;
+constexpr UINT control_compare_target = 1104;
 constexpr UINT_PTR tooltip_memory_ramcfg = 2101;
 constexpr UINT_PTR tooltip_memory_status = 2102;
 constexpr UINT_PTR tooltip_memory_entry = 2103;
@@ -71,6 +74,20 @@ std::wstring widen(const std::string& text) {
     MultiByteToWideChar(
         CP_UTF8, 0, text.data(), static_cast<int>(text.size()), result.data(), length);
     return result;
+}
+
+std::wstring widen_for_edit(const std::string& text) {
+    std::string normalized;
+    normalized.reserve(text.size() + text.size() / 16);
+    char previous = '\0';
+    for (const char current : text) {
+        if (current == '\n' && previous != '\r') {
+            normalized.push_back('\r');
+        }
+        normalized.push_back(current);
+        previous = current;
+    }
+    return widen(normalized);
 }
 
 std::wstring hex_offset(std::size_t value) {
@@ -220,6 +237,14 @@ private:
                 }
                 if (LOWORD(wparam) == command_about) {
                     show_about();
+                    return 0;
+                }
+                if (LOWORD(wparam) == command_compare) {
+                    compare_selected_profiles();
+                    return 0;
+                }
+                if (LOWORD(wparam) == command_ramcfg) {
+                    show_ramcfg_map();
                     return 0;
                 }
                 break;
@@ -375,6 +400,9 @@ private:
 
         memory_caption_ = create_label(L"Memory Support", SS_LEFT | SS_NOTIFY);
         SendMessageW(memory_caption_, WM_SETFONT, reinterpret_cast<WPARAM>(section_font_), TRUE);
+        ramcfg_button_ = create_control(
+            0, L"BUTTON", L"RAMCFG Map", BS_PUSHBUTTON | WS_TABSTOP, command_ramcfg);
+        EnableWindow(ramcfg_button_, FALSE);
         memory_list_ = create_control(
             WS_EX_CLIENTEDGE,
             WC_LISTVIEWW,
@@ -394,6 +422,17 @@ private:
         details_caption_ = create_label(
             L"Selected Memory Profile", SS_LEFT | SS_NOTIFY);
         SendMessageW(details_caption_, WM_SETFONT, reinterpret_cast<WPARAM>(section_font_), TRUE);
+        compare_caption_ = create_label(L"Compare selected with:");
+        compare_target_ = create_control(
+            WS_EX_CLIENTEDGE,
+            L"COMBOBOX",
+            L"",
+            CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP,
+            control_compare_target);
+        compare_button_ = create_control(
+            0, L"BUTTON", L"Compare", BS_PUSHBUTTON | WS_TABSTOP, command_compare);
+        EnableWindow(compare_target_, FALSE);
+        EnableWindow(compare_button_, FALSE);
         profile_value_ = create_label(L"Select a memory entry to inspect its timing map.");
         descriptor_value_ = create_label(L"Descriptor: -", SS_LEFT | SS_NOTIFY);
         timing_list_ = create_control(
@@ -413,7 +452,7 @@ private:
         add_column(timing_list_, 6, L"State", scale(96));
 
         decoded_caption_ = create_label(
-            L"Decoded CONFIG0..CONFIG5 fields", SS_LEFT | SS_NOTIFY);
+            L"Decoded fields and complete raw timing record", SS_LEFT | SS_NOTIFY);
         SendMessageW(decoded_caption_, WM_SETFONT, reinterpret_cast<WPARAM>(section_font_), TRUE);
         decoded_value_ = create_control(
             WS_EX_CLIENTEDGE,
@@ -439,6 +478,9 @@ private:
             L"Records: all Memory Information records declared by the ROM.\n"
             L"Shown: non-Skip descriptors displayed below.\n"
             L"Referenced: displayed descriptors selected by at least one declared physical RAMCFG code.");
+        add_tooltip(
+            ramcfg_button_,
+            L"Shows all 16 standard RAMCFG codebook values, exact translation-byte offsets, logical targets, profile details, aliases, and codes outside this ROM's declared table.");
         add_header_tooltip(
             ListView_GetHeader(memory_list_), 0, tooltip_memory_entry,
             L"One-based row number of a record declared by the VBIOS Memory Information table. It is not the active physical RAMCFG value.");
@@ -484,12 +526,16 @@ private:
             details_caption_,
             L"Entry is the one-based Memory Information row. Strap group is its zero-based logical index in the timing map; it is different from a physical RAMCFG selector.");
         add_tooltip(
+            compare_caption_,
+            L"Compares the selected profile with another Memory Information entry across every used clock range, including all bytes of each complete timing record.");
+        add_tooltip(
             descriptor_value_,
             L"Descriptor is the raw 32-bit memory-profile value. ROM offset is its byte location in the file. Physical straps lists declared RAMCFG codes that translate to this logical profile.");
         add_tooltip(
             decoded_caption_,
-            L"Reverse-engineered memory-controller fields from CONFIG0 through CONFIG5. "
-            L"Values are raw fields or cycle counts, not nanoseconds; smaller is not universally better.");
+            L"Reverse-engineered fields from CONFIG0 through CONFIG5 followed by the "
+            L"complete raw timing record. Bytes after +0x17 remain unnamed experimental "
+            L"data; smaller decoded values are not universally better.");
         DragAcceptFiles(window_, TRUE);
     }
 
@@ -508,7 +554,7 @@ private:
         const int button_width = scale(122);
         const int about_width = scale(82);
         const int button_height = scale(30);
-        HDWP positions = BeginDeferWindowPos(24);
+        HDWP positions = BeginDeferWindowPos(28);
         const auto position = [&](HWND control, int x, int y, int control_width,
                                   int control_height) {
             if (positions) {
@@ -560,8 +606,11 @@ private:
                  content_width - label_width - scale(32), scale(20));
 
         const int memory_title_top = summary_top + summary_height + scale(10);
+        const int ramcfg_button_width = scale(112);
         position(memory_caption_, margin, memory_title_top,
-                 content_width, scale(22));
+                 content_width - ramcfg_button_width - gap, scale(22));
+        position(ramcfg_button_, margin + content_width - ramcfg_button_width,
+                 memory_title_top - scale(4), ramcfg_button_width, scale(26));
         const int memory_top = memory_title_top + scale(23);
         const int available = height - status_height - memory_top - margin;
         const int memory_height = std::max(scale(125), available * 42 / 100);
@@ -569,13 +618,32 @@ private:
 
         const int details_top = memory_top + memory_height + gap;
         const int details_height = std::max(0, height - status_height - details_top - margin);
-        position(details_caption_, margin, details_top, content_width, scale(22));
+        const int compare_button_width = scale(86);
+        const int compare_combo_width = scale(260);
+        const int compare_caption_width = scale(132);
+        const int compare_left = margin + content_width - compare_button_width -
+            compare_combo_width - compare_caption_width - 2 * gap;
+        position(details_caption_, margin, details_top,
+                 std::max(scale(160), compare_left - margin - gap), scale(22));
+        position(compare_caption_, compare_left, details_top + scale(2),
+                 compare_caption_width, scale(20));
+        position(compare_target_, compare_left + compare_caption_width + gap,
+                 details_top - scale(2), compare_combo_width, scale(180));
+        position(compare_button_, compare_left + compare_caption_width + gap +
+                 compare_combo_width + gap, details_top - scale(2),
+                 compare_button_width, scale(26));
         position(profile_value_, margin + scale(14), details_top + scale(24),
                  content_width - scale(28), scale(20));
         position(descriptor_value_, margin + scale(14), details_top + scale(45),
                  content_width - scale(28), scale(20));
         const int timing_top = details_top + scale(68);
-        const int decoded_height = scale(66);
+        const int maximum_decoded_height = std::max(
+            scale(66), details_height - scale(68) - scale(70) - scale(37));
+        const int desired_decoded_height = expanded_report_view_
+            ? std::max(scale(110), details_height * 44 / 100)
+            : scale(66);
+        const int decoded_height = std::min(
+            desired_decoded_height, maximum_decoded_height);
         const int timing_height = std::max(scale(70), details_height - scale(68) - decoded_height - scale(37));
         position(timing_list_, margin + scale(12), timing_top,
                  content_width - scale(24), timing_height);
@@ -646,6 +714,111 @@ private:
         update_header_tooltip(timing_header, 6, tooltip_timing_state);
     }
 
+    void relayout() {
+        RECT client{};
+        GetClientRect(window_, &client);
+        layout_controls(client.right - client.left, client.bottom - client.top);
+    }
+
+    void populate_compare_targets() {
+        SendMessageW(compare_target_, CB_RESETCONTENT, 0, 0);
+        if (!document_) {
+            EnableWindow(compare_target_, FALSE);
+            EnableWindow(compare_button_, FALSE);
+            return;
+        }
+        for (const std::size_t document_index : visible_memory_) {
+            const auto& memory = document_->memory[document_index];
+            const std::wstring label =
+                L"Entry " + std::to_wstring(memory.entry_number) + L" - " +
+                widen(memory.vendor + " " + memory.type + " " + memory.density) +
+                L" [" + widen(memory.coverage) + L"]";
+            const LRESULT item = SendMessageW(
+                compare_target_, CB_ADDSTRING, 0,
+                reinterpret_cast<LPARAM>(label.c_str()));
+            if (item != CB_ERR && item != CB_ERRSPACE) {
+                SendMessageW(
+                    compare_target_, CB_SETITEMDATA,
+                    static_cast<WPARAM>(item),
+                    static_cast<LPARAM>(document_index));
+            }
+        }
+        const LRESULT count = SendMessageW(compare_target_, CB_GETCOUNT, 0, 0);
+        const bool can_compare = count >= 2;
+        EnableWindow(compare_target_, can_compare);
+        EnableWindow(compare_button_, can_compare);
+        if (count > 0) {
+            SendMessageW(compare_target_, CB_SETCURSEL, count > 1 ? 1 : 0, 0);
+        }
+    }
+
+    void choose_different_compare_target() {
+        if (!selected_memory_) return;
+        const LRESULT count = SendMessageW(compare_target_, CB_GETCOUNT, 0, 0);
+        if (count <= 1) return;
+        const LRESULT current = SendMessageW(compare_target_, CB_GETCURSEL, 0, 0);
+        if (current != CB_ERR) {
+            const LRESULT data = SendMessageW(
+                compare_target_, CB_GETITEMDATA, static_cast<WPARAM>(current), 0);
+            if (data != CB_ERR && static_cast<std::size_t>(data) != *selected_memory_) {
+                return;
+            }
+        }
+        for (LRESULT item = 0; item < count; ++item) {
+            const LRESULT data = SendMessageW(
+                compare_target_, CB_GETITEMDATA, static_cast<WPARAM>(item), 0);
+            if (data != CB_ERR && static_cast<std::size_t>(data) != *selected_memory_) {
+                SendMessageW(compare_target_, CB_SETCURSEL, item, 0);
+                return;
+            }
+        }
+    }
+
+    void compare_selected_profiles() {
+        if (!document_ || !selected_memory_) return;
+        const LRESULT selection = SendMessageW(compare_target_, CB_GETCURSEL, 0, 0);
+        if (selection == CB_ERR) return;
+        const LRESULT data = SendMessageW(
+            compare_target_, CB_GETITEMDATA, static_cast<WPARAM>(selection), 0);
+        if (data == CB_ERR) return;
+        const std::size_t target_index = static_cast<std::size_t>(data);
+        if (*selected_memory_ >= document_->memory.size() ||
+            target_index >= document_->memory.size()) {
+            return;
+        }
+        try {
+            const auto& first = document_->memory[*selected_memory_];
+            const auto& second = document_->memory[target_index];
+            const std::string comparison = nvbr::compare_profiles(
+                *document_, first.entry_number, second.entry_number);
+            set_text(
+                decoded_caption_,
+                L"Profile comparison: Entry " + std::to_wstring(first.entry_number) +
+                L" vs Entry " + std::to_wstring(second.entry_number));
+            set_text(decoded_value_, widen_for_edit(comparison));
+            expanded_report_view_ = true;
+            relayout();
+            SetFocus(decoded_value_);
+            SendMessageW(decoded_value_, EM_SETSEL, 0, 0);
+            set_status(L"Profile comparison generated. Use Ctrl+A and Ctrl+C to copy it.");
+        } catch (const std::exception& error) {
+            MessageBoxW(
+                window_, widen(error.what()).c_str(),
+                L"Profile comparison", MB_OK | MB_ICONERROR);
+        }
+    }
+
+    void show_ramcfg_map() {
+        if (!document_) return;
+        set_text(decoded_caption_, L"Physical RAMCFG translation map");
+        set_text(decoded_value_, widen_for_edit(nvbr::ramcfg_report(*document_)));
+        expanded_report_view_ = true;
+        relayout();
+        SetFocus(decoded_value_);
+        SendMessageW(decoded_value_, EM_SETSEL, 0, 0);
+        set_status(L"RAMCFG map generated. The active physical selector is not stored in the ROM.");
+    }
+
     void populate_document() {
         if (!document_) {
             return;
@@ -662,6 +835,8 @@ private:
             L" shown / " + std::to_wstring(document_->referenced_memory_profiles) +
             L" referenced)");
         EnableWindow(save_button_, TRUE);
+        EnableWindow(ramcfg_button_, TRUE);
+        expanded_report_view_ = false;
 
         ListView_DeleteAllItems(memory_list_);
         visible_memory_.clear();
@@ -686,6 +861,8 @@ private:
             set_list_text(memory_list_, row, 5, widen(memory.physical_straps));
             set_list_text(memory_list_, row, 6, widen(memory.coverage));
         }
+
+        populate_compare_targets();
 
         if (ListView_GetItemCount(memory_list_) > 0) {
             ListView_SetItemState(
@@ -721,6 +898,11 @@ private:
             return;
         }
         selected_memory_ = *selected;
+        const bool comparison_was_visible = expanded_report_view_;
+        expanded_report_view_ = false;
+        set_text(decoded_caption_, L"Decoded fields and complete raw timing record");
+        choose_different_compare_target();
+        if (comparison_was_visible) relayout();
         const auto& memory = document_->memory[*selected];
         set_text(profile_value_,
             L"Entry " + std::to_wstring(memory.entry_number) +
@@ -773,6 +955,10 @@ private:
         if (!document_ || !selected_memory_) {
             return;
         }
+        const bool comparison_was_visible = expanded_report_view_;
+        expanded_report_view_ = false;
+        set_text(decoded_caption_, L"Decoded fields and complete raw timing record");
+        if (comparison_was_visible) relayout();
         const int row = ListView_GetNextItem(timing_list_, -1, LVNI_SELECTED);
         if (row < 0) {
             set_text(decoded_value_, L"Select a timing range to view the known fields.");
@@ -799,12 +985,22 @@ private:
         } else if (timing.all_zero_record) {
             set_text(decoded_value_, L"The referenced timing record contains only zero bytes.");
         } else {
-            set_text(decoded_value_, widen(timing.decoded_fields));
+            std::string details = timing.decoded_fields;
+            if (!timing.raw_record.empty()) {
+                details += "\r\n\r\nComplete raw timing record (" +
+                    std::to_string(timing.raw_record.size()) +
+                    " bytes, CRC32 " + timing.raw_record_crc32 + "):\r\n";
+                details += timing.raw_record_hex;
+                details += "\r\n\r\nResearch note: only record bytes +0x00..+0x17 are "
+                    "currently decoded. Later bytes are intentionally preserved as unknown.";
+            }
+            set_text(decoded_value_, widen_for_edit(details));
         }
     }
 
     void clear_profile() {
         selected_memory_.reset();
+        expanded_report_view_ = false;
         set_text(profile_value_, L"Select a memory entry to inspect its timing map.");
         set_text(descriptor_value_, L"Descriptor: -");
         ListView_DeleteAllItems(timing_list_);
@@ -1010,8 +1206,12 @@ private:
     HWND version_value_{};
     HWND file_value_{};
     HWND memory_caption_{};
+    HWND ramcfg_button_{};
     HWND memory_list_{};
     HWND details_caption_{};
+    HWND compare_caption_{};
+    HWND compare_target_{};
+    HWND compare_button_{};
     HWND profile_value_{};
     HWND descriptor_value_{};
     HWND timing_list_{};
@@ -1022,6 +1222,7 @@ private:
     std::unique_ptr<nvbr::Document> document_;
     std::vector<std::size_t> visible_memory_;
     std::optional<std::size_t> selected_memory_;
+    bool expanded_report_view_{};
     std::array<int, 7> memory_column_widths_{};
     std::array<int, 7> timing_column_widths_{};
     int last_column_client_width_{};
