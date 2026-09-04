@@ -15,6 +15,8 @@ if(WIN32)
 endif()
 
 option(NVBR_BUILD_GUI "Build the native Windows GUI" ON)
+option(NVBR_HIDE_VBIOS_VERSION
+    "Hide the parsed VBIOS version from all user-visible output" OFF)
 
 add_library(nvbr_core STATIC
     src/nvbios_reader.cpp
@@ -22,7 +24,10 @@ add_library(nvbr_core STATIC
 
 target_include_directories(nvbr_core PUBLIC include)
 target_compile_features(nvbr_core PUBLIC cxx_std_20)
-target_compile_definitions(nvbr_core PUBLIC NVBR_VERSION="${NVBR_VERSION}")
+target_compile_definitions(nvbr_core PUBLIC
+    NVBR_VERSION="${NVBR_VERSION}"
+    NVBR_HIDE_VBIOS_VERSION=$<BOOL:${NVBR_HIDE_VBIOS_VERSION}>
+)
 
 add_executable(nvidia-bios-reader-cli
     src/cli.cpp

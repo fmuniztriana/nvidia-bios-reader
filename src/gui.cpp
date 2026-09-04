@@ -391,11 +391,15 @@ private:
         SendMessageW(summary_caption_, WM_SETFONT, reinterpret_cast<WPARAM>(section_font_), TRUE);
         chip_caption_ = create_label(L"GPU Chip");
         device_caption_ = create_label(L"Device ID");
+#if !NVBR_HIDE_VBIOS_VERSION
         version_caption_ = create_label(L"VBIOS Version");
+#endif
         file_caption_ = create_label(L"File");
         chip_value_ = create_label(L"-");
         device_value_ = create_label(L"-");
+#if !NVBR_HIDE_VBIOS_VERSION
         version_value_ = create_label(L"-");
+#endif
         file_value_ = create_label(L"Open or drop a VBIOS file");
 
         memory_caption_ = create_label(L"Memory Support", SS_LEFT | SS_NOTIFY);
@@ -594,12 +598,19 @@ private:
         position(chip_value_, x + label_width, row1, value_width, scale(20));
         x += label_width + value_width + scale(20);
         position(device_caption_, x, row1, label_width, scale(20));
+#if NVBR_HIDE_VBIOS_VERSION
+        position(device_value_, x + label_width, row1,
+                 std::max(value_width,
+                          width - margin - (x + label_width + scale(12))),
+                 scale(20));
+#else
         position(device_value_, x + label_width, row1, value_width, scale(20));
         x += label_width + value_width + scale(10);
         position(version_caption_, x, row1, label_width, scale(20));
         position(version_value_, x + label_width, row1,
                  std::max(scale(120), width - margin - (x + label_width + scale(12))),
                  scale(20));
+#endif
         x = margin + scale(16);
         position(file_caption_, x, row2, label_width, scale(20));
         position(file_value_, x + label_width, row2,
@@ -825,7 +836,9 @@ private:
         }
         set_text(chip_value_, widen(document_->chip));
         set_text(device_value_, widen(document_->device_id + " / " + document_->vendor_id));
+#if !NVBR_HIDE_VBIOS_VERSION
         set_text(version_value_, widen(document_->vbios_version));
+#endif
         set_text(file_value_, document_->path.filename().wstring() +
             L"  (" + std::to_wstring(document_->file_size) + L" bytes)");
         set_text(window_, L"NVIDIA BIOS Reader - " + document_->path.filename().wstring());

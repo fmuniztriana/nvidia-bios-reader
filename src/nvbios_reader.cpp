@@ -829,9 +829,11 @@ void parse_timings(
         << "GPU chip:      " << analysis.chip << '\n'
         << "Device ID:     " << hex_value(analysis.legacy.device, 4) << '\n'
         << "Vendor ID:     " << hex_value(analysis.legacy.vendor, 4) << '\n';
+#if !NVBR_HIDE_VBIOS_VERSION
     if (!analysis.vbios_version.empty()) {
         out << "VBIOS version: " << analysis.vbios_version << '\n';
     }
+#endif
     out << "Legacy image:  " << hex_value(analysis.legacy.base)
         << " (" << analysis.legacy.length << " bytes)\n"
         << "BIT table:     " << hex_value(analysis.bit_offset) << '\n'
