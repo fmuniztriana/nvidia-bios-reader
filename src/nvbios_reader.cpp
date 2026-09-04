@@ -204,10 +204,16 @@ struct Analysis {
     return output.str();
 }
 
+std::string path_to_utf8(const fs::path& path) {
+    const auto encoded = path.u8string();
+    return std::string(
+        reinterpret_cast<const char*>(encoded.data()), encoded.size());
+}
+
 [[nodiscard]] std::vector<std::uint8_t> read_file(const fs::path& path) {
     std::ifstream input(path, std::ios::binary | std::ios::ate);
     if (!input) {
-        throw std::runtime_error("Could not open file: " + path.string());
+        throw std::runtime_error("Could not open file: " + path_to_utf8(path));
     }
     const auto end = input.tellg();
     if (end <= 0) {
@@ -824,7 +830,7 @@ void parse_timings(
     std::ostringstream out;
     out << "NVIDIA BIOS Reader " << version << "\n"
         << "========================\n\n"
-        << "File:          " << analysis.path.string() << '\n'
+        << "File:          " << path_to_utf8(analysis.path) << '\n'
         << "File size:     " << analysis.file_size << " bytes\n"
         << "GPU chip:      " << analysis.chip << '\n'
         << "Device ID:     " << hex_value(analysis.legacy.device, 4) << '\n'
@@ -1225,7 +1231,7 @@ std::string compare_profiles(
     std::ostringstream out;
     out << "NVIDIA BIOS Reader profile comparison " << version << "\n"
         << "===============================================\n\n"
-        << "ROM: " << document.path.string() << '\n'
+        << "ROM: " << path_to_utf8(document.path) << '\n'
         << "Entry " << first.entry_number << ": " << first.vendor << ' '
         << first.type << ' ' << first.density << ' ' << first.organization << '\n'
         << "  Physical RAMCFG: " << first.physical_straps_detail << '\n'
@@ -1326,7 +1332,7 @@ std::string ramcfg_report(const Document& document) {
     std::ostringstream out;
     out << "NVIDIA BIOS Reader physical RAMCFG map " << version << "\n"
         << "===============================================\n\n"
-        << "ROM: " << document.path.string() << '\n'
+        << "ROM: " << path_to_utf8(document.path) << '\n'
         << "Translation table: " << hex_value(document.strap_translation_offset)
         << " / " << declared_count << " declared physical codes\n"
         << "Active physical RAMCFG: unknown from a saved ROM file\n\n";

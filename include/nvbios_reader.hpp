@@ -112,6 +112,7 @@ struct Document {
 };
 
 Document inspect_vbios(const std::filesystem::path& path);
+std::string path_to_utf8(const std::filesystem::path& path);
 std::string compare_profiles(
     const Document& document,
     std::size_t first_entry_number,
