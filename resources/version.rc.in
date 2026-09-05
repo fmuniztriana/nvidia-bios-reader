@@ -1,4 +1,7 @@
 #include <windows.h>
+#include "@PROJECT_SOURCE_DIR@/resources/resource.h"
+
+IDI_NVBR ICON "@PROJECT_SOURCE_DIR@/resources/nvidia-bios-reader.ico"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0

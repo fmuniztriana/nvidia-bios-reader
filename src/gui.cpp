@@ -5,6 +5,7 @@
 #define NOMINMAX
 
 #include "nvbios_reader.hpp"
+#include "../resources/resource.h"
 
 #include <windows.h>
 #include <commctrl.h>
@@ -136,8 +137,12 @@ public:
         window_class.lpfnWndProc = &Application::window_proc;
         window_class.hInstance = instance;
         window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-        window_class.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-        window_class.hIconSm = window_class.hIcon;
+        window_class.hIcon = static_cast<HICON>(LoadImageW(
+            instance, MAKEINTRESOURCEW(IDI_NVBR), IMAGE_ICON,
+            GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED));
+        window_class.hIconSm = static_cast<HICON>(LoadImageW(
+            instance, MAKEINTRESOURCEW(IDI_NVBR), IMAGE_ICON,
+            GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED));
         window_class.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
         window_class.lpszClassName = window_class_name;
         if (!RegisterClassExW(&window_class)) {
