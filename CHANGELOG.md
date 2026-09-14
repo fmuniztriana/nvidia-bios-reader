@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0-beta.2] - 2026-09-14
+
+**Main change: experimental GDDR7 structural reading in GUI and CLI.**
+See [release notes](docs/releases/v0.4.0-beta.2.md).
+
+- Recognize GDDR7 descriptors in the observed v0x10/22-byte layout.
+- Show inferred 2CH/clamshell and 4CH organization, and inferred 24 Gbit density.
+- Preserve structural coverage and full raw-record comparisons in GUI and CLI.
+- Suppress unvalidated GDDR7 clock conversions and named timing decoding.
+- Flag zero-prefix/nonzero-tail records; document evidence and remaining gaps.
+- No claim of active RAMCFG detection, runtime stability, or validated GDDR7 timing semantics.
+- Restore visible VBIOS versions in public builds and support Unicode ROM filenames.
+
 All notable changes to this project will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

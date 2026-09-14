@@ -355,6 +355,7 @@ void parse_info(
         case 0x6: return "HBM2";
         case 0x9: return "GDDR6";
         case 0xA: return "GDDR6X";
+        case 0xD: return "GDDR7 (experimental)";
         case 0xF: return "Skip";
         default: return "Unknown " + hex_value(code);
     }
@@ -391,6 +392,13 @@ void parse_info(
 
 [[nodiscard]] std::string memory_organization(
     std::uint8_t memory_type_code, std::uint8_t code) {
+    if (memory_type_code == 0xD) {
+        switch (code) {
+            case 2: return "2CH x8 / x16 clamshell (inferred)";
+            case 3: return "4CH x8 / x32 (inferred)";
+            default: return "Unknown " + hex_value(code);
+        }
+    }
     if (memory_type_code == 0x9 || memory_type_code == 0xA) {
         switch (code) {
             case 0x1: return "x8 / double-sided clamshell";
@@ -543,6 +551,10 @@ void parse_memory(
         entry.offset = offset;
         entry.descriptor = descriptor;
         entry.memory_type_code = static_cast<std::uint8_t>(field(descriptor, 0, 3));
+        if (entry.memory_type_code == 0xD &&
+            (result.memory_table_version != 0x10 || header_length != 7 || record_length != 22)) {
+            throw ParseError("Unsupported experimental GDDR7 memory descriptor layout (expected v0x10, header 7, record 22)");
+        }
         entry.strap_code = static_cast<std::uint8_t>(field(descriptor, 4, 7));
         entry.variant_index = static_cast<std::uint8_t>(field(descriptor, 8, 11));
         entry.vendor_code = static_cast<std::uint8_t>(field(descriptor, 12, 15));
@@ -557,7 +569,8 @@ void parse_memory(
             entry.organization = "";
         } else {
             entry.vendor = memory_vendor(entry.vendor_code);
-            entry.density = memory_density(entry.density_code);
+            entry.density = entry.memory_type_code == 0xD && entry.density_code == 7
+                ? "24 Gbit (inferred)" : memory_density(entry.density_code);
             entry.organization = memory_organization(
                 entry.memory_type_code, entry.organization_code);
         }
@@ -950,14 +963,23 @@ void parse_timings(
                 << "  Physical straps: " << physical_straps(entry) << '\n'
                 << "  Descriptor:      " << hex_value(entry.descriptor, 8) << '\n'
                 << "  Timing coverage: " << timing_status(rom, analysis, entry.index) << '\n';
+            if (entry.memory_type_code == 0xD) {
+                out << "  EXPERIMENTAL GDDR7: organization and 24 Gbit density are inferred.\n"
+                    << "  Coverage is structural only; active RAMCFG and stability are unknown.\n"
+                    << "  Named timings, clock units and P-state mapping are not validated.\n";
+            }
         }
 
         if (entry.memory_type_code != 0xF && !analysis.timing_ranges.empty()) {
             for (const auto& range : analysis.timing_ranges) {
                 out << "    Range " << range.index << " @ " << hex_value(range.offset)
-                    << ": MCLK " << range.low << "-" << range.high << " MHz";
+                    << (entry.memory_type_code == 0xD ? ": raw range " : ": MCLK ")
+                    << range.low << "-" << range.high
+                    << (entry.memory_type_code == 0xD ? " (units unvalidated)" : " MHz");
                 if (range.low == 0 && range.high == 0) {
                     out << " (unused map slot; excluded from coverage) -> ";
+                } else if (entry.memory_type_code == 0xD) {
+                    out << " -> ";
                 } else {
                     const double divisor = device_clock_divisor(entry.memory_type_code);
                     out << " (inferred device clock, MCLK/"
@@ -989,7 +1011,15 @@ void parse_timings(
                     out << " (all-zero record)";
                 }
                 out << '\n';
-                if (show_decoded_timings && analysis.timing_table->stride >= 24) {
+                if (show_decoded_timings && entry.memory_type_code == 0xD) {
+                    out << "      Named timing decoding unavailable (experimental GDDR7).\n";
+                    const auto raw = rom.slice(timing_offset, analysis.timing_table->stride);
+                    if (raw.size() >= 24 &&
+                        std::all_of(raw.begin(), raw.begin()+24, [](auto v) { return v == 0; }) &&
+                        std::any_of(raw.begin()+24, raw.end(), [](auto v) { return v != 0; })) {
+                        out << "      Zero 24-byte prefix / nonzero tail; interpretation unknown.\n";
+                    }
+                } else if (show_decoded_timings && analysis.timing_table->stride >= 24) {
                     const auto t = decode_timing_fields(rom, timing_offset);
                     out << "      RC=" << t.rc << " RFC=" << t.rfc
                         << " RAS=" << t.ras << " RP=" << t.rp
@@ -1012,7 +1042,7 @@ void parse_timings(
             << "------------------------------------------\n"
             << "The complete " << table.stride
             << "-byte records are preserved below. Only the first 24 bytes are\n"
-            << "currently decoded as CONFIG0..CONFIG5; later bytes remain unnamed.\n\n";
+            << "decoded as CONFIG0..CONFIG5 for legacy memory types only; GDDR7 remains raw-only.\n\n";
         for (std::size_t id = 0; id < table.record_count; ++id) {
             const std::size_t offset = table.offset + table.header_length + id * table.stride;
             const auto raw = rom.slice(offset, table.stride);
@@ -1032,11 +1062,11 @@ void parse_timings(
         << "- Density is per memory device; total VRAM cannot be derived from this descriptor alone.\n"
         << "- L/M/H describes the standard multilevel RAMCFG codebook; M is the midpoint voltage.\n"
         << "- Only physical codes inside the VBIOS-declared translation-table count are selectable mappings.\n"
-        << "- Timing values are memory-controller register fields/cycle counts, not nanoseconds.\n"
+        << "- Legacy decoded timing values are controller fields/cycle counts, not nanoseconds. GDDR7 fields are not decoded.\n"
         << "- FULL describes timing-map coverage only; it does not prove boot, training, or P-state stability.\n"
         << "- CRC32 groups byte-identical raw records; it is an identification aid, not a security hash.\n"
         << "- Bytes after record +0x17 are preserved as unknown unless separately documented.\n"
-        << "- Timing-map ranges use the NVIDIA/Afterburner MCLK domain; device clock is inferred as MCLK/4 for GDDR6 and MCLK/8 for GDDR6X.\n"
+        << "- For GDDR6/GDDR6X, device clock is inferred as MCLK/4 or MCLK/8. GDDR7 bounds remain raw, with unknown units and P-states.\n"
         << "- This tool reads the ROM only and never modifies it.\n";
     return out.str();
 }
@@ -1143,6 +1173,7 @@ Document inspect_vbios(const fs::path& path) {
     document.memory.reserve(analysis.memory_entries.size());
     for (const auto& entry : analysis.memory_entries) {
         MemoryView memory;
+        memory.experimental = entry.memory_type_code == 0xD;
         memory.entry_number = entry.index + 1;
         memory.strap_group = entry.index;
         memory.descriptor_offset = entry.offset;
@@ -1162,13 +1193,14 @@ Document inspect_vbios(const fs::path& path) {
             memory.timings.reserve(analysis.timing_ranges.size());
             for (const auto& range : analysis.timing_ranges) {
                 TimingView timing;
+                timing.clock_units_known = !memory.experimental;
                 timing.range_index = range.index;
                 timing.raw_low = range.low;
                 timing.raw_high = range.high;
                 timing.device_clock_divisor = device_clock_divisor(entry.memory_type_code);
-                timing.device_low_mhz = static_cast<double>(range.low) /
+                timing.device_low_mhz = memory.experimental ? 0.0 : static_cast<double>(range.low) /
                     timing.device_clock_divisor;
-                timing.device_high_mhz = static_cast<double>(range.high) /
+                timing.device_high_mhz = memory.experimental ? 0.0 : static_cast<double>(range.high) /
                     timing.device_clock_divisor;
                 timing.unused = range.low == 0 && range.high == 0;
                 if (entry.index < range.timing_ids.size()) {
@@ -1187,7 +1219,10 @@ Document inspect_vbios(const fs::path& path) {
                             timing.raw_record.assign(raw.begin(), raw.end());
                             timing.raw_record_hex = raw_record_hex(raw);
                             timing.raw_record_crc32 = hex_value(crc32(raw), 8);
-                            if (analysis.timing_table->stride >= 24) {
+                            timing.zero_prefix_nonzero_tail = raw.size() >= 24 &&
+                                std::all_of(raw.begin(), raw.begin()+24, [](auto v) { return v == 0; }) &&
+                                std::any_of(raw.begin()+24, raw.end(), [](auto v) { return v != 0; });
+                            if (!memory.experimental && analysis.timing_table->stride >= 24) {
                                 timing.decoded_fields = timing_fields_text(
                                     decode_timing_fields(rom, offset));
                             }
@@ -1228,6 +1263,7 @@ std::string compare_profiles(
 
     const MemoryView& first = find_entry(first_entry_number);
     const MemoryView& second = find_entry(second_entry_number);
+    const bool experimental = first.experimental || second.experimental;
     std::ostringstream out;
     out << "NVIDIA BIOS Reader profile comparison " << version << "\n"
         << "===============================================\n\n"
@@ -1238,6 +1274,9 @@ std::string compare_profiles(
         << "Entry " << second.entry_number << ": " << second.vendor << ' '
         << second.type << ' ' << second.density << ' ' << second.organization << '\n'
         << "  Physical RAMCFG: " << second.physical_straps_detail << "\n\n";
+    if (experimental) {
+        out << "EXPERIMENTAL GDDR7: raw comparison only. No timing tightness, stability, clock units or active-profile inference.\n\n";
+    }
 
     const std::size_t range_count = std::max(first.timings.size(), second.timings.size());
     std::size_t comparable = 0;
@@ -1249,7 +1288,8 @@ std::string compare_profiles(
         const TimingView* b = index < second.timings.size() ? &second.timings[index] : nullptr;
         const std::size_t range_index = a ? a->range_index : (b ? b->range_index : index);
         out << "Range " << range_index;
-        if (a) out << " / MCLK " << a->raw_low << '-' << a->raw_high << " MHz";
+        if (a) out << (experimental ? " / raw range " : " / MCLK ")
+                   << a->raw_low << '-' << a->raw_high << (experimental ? " (units unvalidated)" : " MHz");
         out << '\n';
         if (!a || !b) {
             out << "  Result: range is missing from one profile\n\n";
@@ -1275,19 +1315,19 @@ std::string compare_profiles(
             continue;
         }
         ++comparable;
-        const bool fields_equal = a->decoded_fields == b->decoded_fields;
+        const bool fields_equal = !experimental && !a->decoded_fields.empty() && a->decoded_fields == b->decoded_fields;
         if (fields_equal) ++decoded_equal;
         const bool records_equal = a->raw_record == b->raw_record;
         if (records_equal) {
             ++raw_equal;
             out << "  Decoded CONFIG0..CONFIG5: "
-                << (fields_equal ? "IDENTICAL" : "DIFFERENT") << '\n'
+                << (experimental ? "UNAVAILABLE (experimental GDDR7)" : fields_equal ? "IDENTICAL" : "DIFFERENT") << '\n'
                 << "  Complete raw record: IDENTICAL\n\n";
             continue;
         }
         ++raw_different;
         out << "  Decoded CONFIG0..CONFIG5: "
-            << (fields_equal ? "IDENTICAL" : "DIFFERENT") << '\n'
+            << (experimental ? "UNAVAILABLE (experimental GDDR7)" : fields_equal ? "IDENTICAL" : "DIFFERENT") << '\n'
             << "  Complete raw record: DIFFERENT\n"
             << "  Differing bytes:";
         const std::size_t byte_count = std::max(
@@ -1315,7 +1355,7 @@ std::string compare_profiles(
     out << "Summary\n"
         << "-------\n"
         << "Comparable used ranges: " << comparable << '\n'
-        << "Decoded CONFIG0..CONFIG5 equal: " << decoded_equal << '\n'
+        << "Decoded CONFIG0..CONFIG5 equal: " << (experimental ? "N/A (experimental GDDR7)" : std::to_string(decoded_equal)) << '\n'
         << "Complete raw records equal: " << raw_equal << '\n'
         << "Complete raw records different: " << raw_different << "\n\n"
         << "Interpretation: decoded equality covers only the first 24 bytes. Raw\n"

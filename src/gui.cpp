@@ -5,6 +5,7 @@
 #define NOMINMAX
 
 #include "nvbios_reader.hpp"
+#include "../resources/resource.h"
 
 #include <windows.h>
 #include <commctrl.h>
@@ -136,8 +137,12 @@ public:
         window_class.lpfnWndProc = &Application::window_proc;
         window_class.hInstance = instance;
         window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-        window_class.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-        window_class.hIconSm = window_class.hIcon;
+        window_class.hIcon = static_cast<HICON>(LoadImageW(
+            instance, MAKEINTRESOURCEW(IDI_NVBR), IMAGE_ICON,
+            GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED));
+        window_class.hIconSm = static_cast<HICON>(LoadImageW(
+            instance, MAKEINTRESOURCEW(IDI_NVBR), IMAGE_ICON,
+            GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED));
         window_class.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
         window_class.lpszClassName = window_class_name;
         if (!RegisterClassExW(&window_class)) {
@@ -490,10 +495,10 @@ private:
             L"One-based row number of a record declared by the VBIOS Memory Information table. It is not the active physical RAMCFG value.");
         add_header_tooltip(
             ListView_GetHeader(memory_list_), 3, tooltip_memory_density,
-            L"Nominal capacity of one memory device, not total board VRAM. Total capacity also depends on device count, organization and physical population.");
+            L"Nominal capacity per memory device, not total board VRAM. GDDR7 code 7 is interpreted as 24 Gbit experimentally, not confirmed by active-profile measurements.");
         add_header_tooltip(
             ListView_GetHeader(memory_list_), 4, tooltip_memory_organization,
-            L"Decoded organization expected by this firmware profile. x16/single-sided and x8/double-sided clamshell describe profile topology; they do not prove how this particular board is physically populated.");
+            L"Profile organization, not detected PCB population. For experimental GDDR7: 4CH x8 means aggregate x32; 2CH x8 means aggregate x16/clamshell. These mappings are inferred. Manufacturer alone does not determine organization.");
         add_header_tooltip(
             ListView_GetHeader(memory_list_), 5, tooltip_memory_ramcfg,
             L"Maps an electrical STRAP2/STRAP1/STRAP0 combination to a memory descriptor. "
@@ -510,10 +515,10 @@ private:
             L"Index of the clock-range record in the timing map. A raw 0-0 range is an unused slot and does not affect coverage.");
         add_header_tooltip(
             ListView_GetHeader(timing_list_), 2, tooltip_timing_clock,
-            L"Memory-device clock comparable to GPU-Z: inferred as MCLK/4 for GDDR6 and MCLK/8 for GDDR6X. It is not a documented P-state name.");
+            L"Inferred as MCLK/4 for GDDR6 and MCLK/8 for GDDR6X. GDDR7 conversion is unavailable: units and P-state mapping are not validated.");
         add_header_tooltip(
             ListView_GetHeader(timing_list_), 1, tooltip_timing_mclk,
-            L"Clock domain used by NVIDIA telemetry and tools such as MSI Afterburner. For example, 11501 MHz GDDR6X is about 1437.6 MHz at the memory device.");
+            L"GDDR6/GDDR6X: NVIDIA MCLK domain. Experimental GDDR7: raw firmware bounds only, with no validated units or P-state assignment.");
         add_header_tooltip(
             ListView_GetHeader(timing_list_), 3, tooltip_timing_id,
             L"Timing-record index selected for this memory descriptor and clock range. FF means that no timing record is referenced.");
@@ -917,12 +922,17 @@ private:
         choose_different_compare_target();
         if (comparison_was_visible) relayout();
         const auto& memory = document_->memory[*selected];
+        LVCOLUMNW raw_column{};
+        raw_column.mask = LVCF_TEXT;
+        raw_column.pszText = const_cast<wchar_t*>(memory.experimental ? L"Raw Range" : L"MCLK Range");
+        ListView_SetColumn(timing_list_, 1, &raw_column);
         set_text(profile_value_,
             L"Entry " + std::to_wstring(memory.entry_number) +
             L" / strap group " + std::to_wstring(memory.strap_group) +
             L"    " + widen(memory.vendor + " " + memory.type + " " +
                               memory.density + " " + memory.organization) +
-            L"    Status: " + widen(memory.coverage));
+            L"    Coverage: " + widen(memory.coverage) +
+            (memory.experimental ? L" (experimental; not stability)" : L""));
         std::wostringstream descriptor;
         descriptor << L"Descriptor: 0x" << std::uppercase << std::hex
                    << std::setw(8) << std::setfill(L'0') << memory.descriptor
@@ -943,7 +953,7 @@ private:
             ListView_InsertItem(timing_list_, &item);
             set_list_text(timing_list_, row, 1, decimal_range(timing.raw_low, timing.raw_high));
             set_list_text(timing_list_, row, 2,
-                timing.unused ? L"Unused map slot" : device_clock_range(
+                timing.unused ? L"Unused map slot" : !timing.clock_units_known ? L"Unvalidated (GDDR7)" : device_clock_range(
                     timing.device_low_mhz, timing.device_high_mhz));
             set_list_text(timing_list_, row, 3,
                 timing.timing_id ? std::to_wstring(*timing.timing_id) : L"FF");
@@ -998,14 +1008,20 @@ private:
         } else if (timing.all_zero_record) {
             set_text(decoded_value_, L"The referenced timing record contains only zero bytes.");
         } else {
-            std::string details = timing.decoded_fields;
+            std::string details = memory.experimental
+                ? "EXPERIMENTAL GDDR7: named timing decoding is unavailable. Coverage is structural only; active RAMCFG, clock units, P-states and stability are unknown."
+                : timing.decoded_fields;
+            if (memory.experimental && timing.zero_prefix_nonzero_tail) {
+                details += "\r\nZero 24-byte prefix / nonzero tail: record interpretation is unknown.";
+            }
             if (!timing.raw_record.empty()) {
                 details += "\r\n\r\nComplete raw timing record (" +
                     std::to_string(timing.raw_record.size()) +
                     " bytes, CRC32 " + timing.raw_record_crc32 + "):\r\n";
                 details += timing.raw_record_hex;
-                details += "\r\n\r\nResearch note: only record bytes +0x00..+0x17 are "
-                    "currently decoded. Later bytes are intentionally preserved as unknown.";
+                details += memory.experimental
+                    ? "\r\n\r\nResearch note: all GDDR7 record bytes are preserved without assigning timing names."
+                    : "\r\n\r\nResearch note: only record bytes +0x00..+0x17 are currently decoded. Later bytes are intentionally preserved as unknown.";
             }
             set_text(decoded_value_, widen_for_edit(details));
         }

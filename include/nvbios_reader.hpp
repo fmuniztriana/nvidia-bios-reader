@@ -10,7 +10,7 @@
 namespace nvbr {
 
 #ifndef NVBR_VERSION
-#define NVBR_VERSION "0.4.0-beta.1"
+#define NVBR_VERSION "0.4.0-beta.2"
 #endif
 
 inline constexpr const char* version = NVBR_VERSION;
@@ -22,6 +22,8 @@ inline constexpr const char* project_url =
 inline constexpr const char* copyright = "Copyright (c) 2026 Felipe Muniz";
 
 struct TimingView {
+    bool clock_units_known{true};
+    bool zero_prefix_nonzero_tail{};
     std::size_t range_index{};
     std::uint16_t raw_low{};
     std::uint16_t raw_high{};
@@ -51,6 +53,7 @@ struct TablePointerView {
 };
 
 struct MemoryView {
+    bool experimental{};
     std::size_t entry_number{};
     std::size_t strap_group{};
     std::size_t descriptor_offset{};

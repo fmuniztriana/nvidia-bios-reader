@@ -45,7 +45,7 @@ void print_usage() {
         << "  nvidia-bios-reader-cli <file.rom> --ramcfg [-o ramcfg.txt]\n"
         << "  nvidia-bios-reader-cli <file.rom> --compare-profiles A B [-o diff.txt]\n\n"
         << "Options:\n"
-        << "  --timings         Decode fields and inventory every complete raw record\n"
+        << "  --timings         Decode legacy fields and inventory raw records (GDDR7: raw-only)\n"
         << "  --ramcfg          Show physical codes, translation bytes, targets and aliases\n"
         << "  --compare-profiles A B\n"
         << "                    Compare two 1-based memory entries byte by byte\n"

@@ -1,6 +1,6 @@
 # NVIDIA BIOS Reader
 
-[![Version 0.4.0 beta 1](https://img.shields.io/badge/version-0.4.0--beta.1-orange.svg)](https://github.com/fmuniztriana/nvidia-bios-reader/releases)
+[![Version 0.4.0 beta 2](https://img.shields.io/badge/version-0.4.0--beta.2-orange.svg)](https://github.com/fmuniztriana/nvidia-bios-reader/releases/tag/v0.4.0-beta.2)
 [![Build](https://github.com/fmuniztriana/nvidia-bios-reader/actions/workflows/build.yml/badge.svg)](https://github.com/fmuniztriana/nvidia-bios-reader/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -12,6 +12,23 @@ The project began as an investigation into GDDR6 memory-density upgrades and
 the low-P-state instability sometimes observed after those modifications. Its
 current focus is making memory profiles, strap translation, timing coverage,
 and relevant ROM offsets visible and reproducible.
+
+## New in v0.4.0-beta.2: experimental GDDR7 support
+
+GDDR7 type `0xD` is recognized for the observed v0x10 memory-information
+layout (7-byte header, 22-byte records). Vendor, raw descriptor, offsets,
+translation references and complete raw timing records are exposed in GUI/CLI.
+Organization codes 2/3 are labelled as inferred two-/four-channel configurations;
+density code 7 is labelled `24 Gbit (inferred)`. These are not active-hardware detections.
+
+GDDR7 clock units, P-state mapping and named timing fields are **not validated**:
+device-clock conversion and CONFIG0–CONFIG5 decoding are disabled for GDDR7.
+FULL/PARTIAL/EMPTY describe structural reference coverage, never stability or
+support for a memory upgrade. Raw comparisons remain available without timing
+tightness rankings. A zero prefix with a nonzero tail is explicitly flagged.
+
+See [research evidence and limitations](docs/research/blackwell-professional-memory-profiles.md).
+Unknown GDDR7 descriptor layouts are rejected rather than decoded speculatively.
 
 ## Why this project exists
 

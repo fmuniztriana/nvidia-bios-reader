@@ -7,7 +7,7 @@ project(nvidia_bios_reader
     LANGUAGES CXX
 )
 
-set(NVBR_VERSION "${PROJECT_VERSION}-beta.1" CACHE STRING
+set(NVBR_VERSION "${PROJECT_VERSION}-beta.2" CACHE STRING
     "User-visible version string (set to the release version for release builds)")
 
 if(WIN32)
